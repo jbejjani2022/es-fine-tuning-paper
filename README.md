@@ -1,6 +1,8 @@
 # es-fine-tuning-paper
 This repo contains the source code for the paper "Evolution Strategies at Scale: LLM Fine-Tuning Beyond Reinforcement Learning" (https://arxiv.org/abs/2509.24372). Evolution strategies (ES) is used to directly optimize billions of parameters of large language models (LLMs).
 
+Feel free to join the ES fine-tuning forum in [Discussions](https://github.com/VsonicV/es-fine-tuning-paper/discussions).
+
 Note: we are still actively adding more experimental codes into this repo.
 
 ## Setup
