@@ -39,7 +39,7 @@ accelerate launch \
     countdown/es_fine-tuning_countdown.py \
     --data_sample 200 \
     --model_name Qwen/Qwen2.5-3B-Instruct \
-    --gpu_threads 1 \
+    --gpu_threads 1
 ```
 
 ## Other Parameters
