@@ -106,7 +106,7 @@ def process_seed(seed_args):
     if verbose:
         print(f"Process {accelerator.process_index} Thread {thread_id} processing seed {seed_idx} (value: {seed})")
 
-    # Put load-evaluate-restore in the same lock block for thread safety
+    # Weight perturbation
     for name, param in model.named_parameters():
         gen = torch.Generator(device=param.device)
 
