@@ -24,7 +24,7 @@ accelerate launch \
     --num_machines 1 \
     --machine_rank 0 \
     es_fine-tuning_conciseness.py \
-    --gpu_threads=2 \
+    --gpu_threads=1 \
     --model_name=Qwen/Qwen2.5-7B-Instruct
 ```
 
@@ -39,7 +39,7 @@ accelerate launch \
     countdown/es_fine-tuning_countdown.py \
     --data_sample 200 \
     --model_name Qwen/Qwen2.5-3B-Instruct \
-    --gpu_threads 2 \
+    --gpu_threads 1 \
 ```
 
 ## Other Parameters
