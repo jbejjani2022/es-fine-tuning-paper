@@ -24,6 +24,7 @@ parser.add_argument('--hf_cache_dir', type=str, default='hf_cache')
 parser.add_argument('--precision', type=str, default='bf16')
 parser.add_argument('--gpu_threads', type=int, default=4, help='Number of parallel threads per GPU')
 parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
+parser.add_argument('--save_steps', type=int, default=100, help='Save checkpoint every n iterations')
 parser.add_argument('--iterations', type=int, default=1000, help='Number of ES iterations (generations)')
 parser.add_argument('--population_size', type=int, default=30, help='Population size (number of perturbations per iteration)')
 parser.add_argument('--sigma', type=float, default=0.001, help='Standard deviation for weight perturbations (noise scale)')
@@ -56,6 +57,26 @@ with open('conciseness/data/train.jsonl', 'r') as f:
 def compute_reward(generated_text, target_text):
     # Negative absolute difference in length
     return -abs(len(generated_text) - len(target_text))
+
+def get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False):
+    """Generate consistent save directory path for checkpoints and final model"""
+    question_num = dataset_size
+    suffix = "final" if is_final else "checkpoint"
+    save_dir = os.path.join(
+        "checkpoints",
+        f"conciseness/{model_name}/{initial_seed}",
+        f"es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{iteration}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_{suffix}"
+    )
+    return save_dir
+
+def save_model_checkpoint(model, tokenizer, iteration, model_name, initial_seed, args, dataset_size):
+    """Save model checkpoint at specified iteration"""
+    save_dir = get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False)
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Saving checkpoint at iteration {iteration} to {save_dir}...")
+    model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+    print(f"Checkpoint saved successfully.")
 
 def force_memory_cleanup():
     """Force aggressive memory cleanup"""
@@ -349,19 +370,22 @@ def main():
             print(f"Iteration {iteration + 1}/{NUM_ITERATIONS}, Time: {iter_time:.2f}s, Mean: {mean_reward:.2f}, Min: {min_reward:.2f}, Max: {max_reward:.2f}")
             print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
 
+            # Save checkpoint every save_steps iterations
+            if (iteration + 1) % args.save_steps == 0:
+                save_model_checkpoint(original_model, tokenizer, iteration + 1, model_name, initial_seed, args, len(dataset))
+
     total_time = time.time() - training_start_time
 
 
-    # Save the fine-tuned model weights.
+    # Save the final fine-tuned model weights.
     if accelerator.is_main_process:
         print(f"Training completed in {total_time:.2f}s ({total_time/60:.2f} minutes)")
-        question_num = len(dataset)
-        save_dir = os.path.join("checkpoints", f"conciseness/{model_name}/{initial_seed}", f"es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{NUM_ITERATIONS}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_final")
+        save_dir = get_save_dir(model_name, initial_seed, NUM_ITERATIONS, len(dataset), args, is_final=True)
         os.makedirs(save_dir, exist_ok=True)
-        print(f"Saving model to {save_dir}...")
+        print(f"Saving final model to {save_dir}...")
         original_model.save_pretrained(save_dir)
         tokenizer.save_pretrained(save_dir)
-        print(f"Model saved successfully.")
+        print(f"Final model saved successfully.")
 
 if __name__ == "__main__":
     os.environ["PYTHONWARNINGS"] = "ignore"

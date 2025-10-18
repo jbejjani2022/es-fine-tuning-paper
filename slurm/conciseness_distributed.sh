@@ -37,6 +37,7 @@ accelerate launch \
     --gpu_threads 2 \
     --max_new_tokens 100 \
     --iterations 1000 \
+    --save_steps 200 \
     --population_size 30 \
     --sigma 0.001 \
     --alpha 0.0005 \
