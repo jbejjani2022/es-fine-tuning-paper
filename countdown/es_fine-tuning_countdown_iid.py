@@ -58,11 +58,21 @@ def force_memory_cleanup():
         torch.cuda.ipc_collect()
         torch.cuda.synchronize()
 
+def get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False):
+    """Generate consistent save directory path for checkpoints and final model"""
+    question_num = dataset_size
+    suffix = "final" if is_final else "checkpoint"
+    save_dir = os.path.join(
+        "checkpoints",
+        f"countdown/{model_name}/{initial_seed}",
+        f"es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{iteration}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_{suffix}"
+    )
+    return save_dir
+
 def save_model_checkpoint(model, tokenizer, iteration, model_name, initial_seed, args, dataset_size):
     """Save model checkpoint at specified iteration"""
-    question_num = dataset_size
-    os.makedirs(str(initial_seed), exist_ok=True)
-    save_dir = os.path.join(str(initial_seed), f"{model_name}_es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{iteration}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_checkpoint")
+    save_dir = get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False)
+    os.makedirs(save_dir, exist_ok=True)
     print(f"Saving checkpoint at iteration {iteration} to {save_dir}...")
     model.save_pretrained(save_dir)
     tokenizer.save_pretrained(save_dir)
@@ -403,8 +413,8 @@ def main():
     # Save the final fine-tuned model weights.
     if accelerator.is_main_process:
         print(f"Training completed in {total_time:.2f}s ({total_time/60:.2f} minutes)")
-        question_num = len(dataset)
-        save_dir = f"{model_name}_es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{NUM_ITERATIONS}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_final"
+        save_dir = get_save_dir(model_name, initial_seed, NUM_ITERATIONS, len(dataset), args, is_final=True)
+        os.makedirs(save_dir, exist_ok=True)
         print(f"Saving final model to {save_dir}...")
         original_model.save_pretrained(save_dir)
         tokenizer.save_pretrained(save_dir)
