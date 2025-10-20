@@ -3,7 +3,7 @@ This repo contains the source code for the paper "Evolution Strategies at Scale:
 
 Feel free to join the ES fine-tuning forum in [Discussions](https://github.com/VsonicV/es-fine-tuning-paper/discussions).
 
-Note: we are still actively adding more experimental codes into this repo.
+Note: we are still actively adding more experimental codes into this repo. We expect breaking change to the accelerated implementations.
 
 ## Setup
 Create a virtual environment with python version >= 3.10 and activate it
@@ -15,6 +15,12 @@ source es/bin/activate
 From the root of the repository run following command to install all the relevant python packages
 ```bash
 pip install -r requirement.txt
+```
+
+If you are using the latest accelerated version `es-fine-tuning_countdown_accl.py`, please also install the `vllm` and `tensorboard` by:
+```bash
+pip install vllm==0.11.0
+pip install tensorboard
 ```
 
 ## Usage
@@ -43,6 +49,31 @@ accelerate launch \
     --model_name Qwen/Qwen2.5-3B-Instruct \
     --gpu_threads 1
 ```
+
+For running an accelerated countdown task:
+```bash
+# Single-GPU quickstart
+python es_fine-tuning_countdown_accl.py \
+  --model_name Qwen/Qwen2.5-3B-Instruct \
+  --cuda_devices 0 \
+  --num_engines 1 \
+  --population_size 30 \
+  --num_iterations 1000
+
+# Multi-GPU run (one vLLM engine per GPU)
+python es_fine-tuning_countdown_accl.py \
+  --model_name Qwen/Qwen2.5-3B-Instruct \
+  --cuda_devices 0,1,2,3 \
+  --num_engines 4 \
+  --population_size 30 \
+  --num_iterations 1000 \
+  --sigma 0.001 \
+  --alpha 0.0005 \
+  --experiment_dir es-ft-experiment
+```
+
+On preliminary 4xH100 setting, accelerated version achieves ~10 times speed-up with similar convergence rate.
+
 
 ## Other Parameters
 
