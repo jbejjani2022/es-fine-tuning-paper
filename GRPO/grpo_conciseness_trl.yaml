@@ -1,61 +1,44 @@
-# TRL GRPO sweep config for reproducing the Conciseness table (GRPO only)
-# Model: Qwen/Qwen2.5-7B-Instruct
-# We sweep over beta (KL strength) and seed.
+# TRL GRPO config for reproducing Table 2 (Conciseness)
+# Paper: "Evolution Strategies at Scale" – Conciseness setup
+# Base model: Qwen/Qwen2.5-7B-Instruct
 
 model_name: Qwen/Qwen2.5-7B-Instruct
 
-# Dataset: a JSONL file with either {"prompt": "..."} or {"question": "..."}.
-# Your earlier path:
+# Data (2 train, 8 eval; Appendix A.1 / Tables 4 & 5)
 train_jsonl: /n/home07/itamarf/es-fine-tuning-paper/conciseness/data/train.jsonl
-# Optional held-out for reporting reward/KL (if omitted, trainer logs are used):
-eval_jsonl: /n/home07/itamarf/es-fine-tuning-paper/conciseness/data/eval.jsonl
+eval_jsonl:  /n/home07/itamarf/es-fine-tuning-paper/conciseness/data/eval.jsonl
 prompt_key: question
 solution_key: answer
 
-# Group size (generations per prompt)
+# GRPO group size (Table 2)
 num_generations: 30
 
-# Tokenization / lengths
+# Lengths
 max_prompt_length: 128
 max_completion_length: 64
 
-# Decoding
-temperature: 0.7
+# Decoding (sampling during training; ES is greedy but GRPO not specified—use plain defaults)
+temperature: 1.0
 top_p: 1.0
 
-prompt_key: question
-solution_key: answer
-
-# Optim
+# Optim (α = 5e-6, 1000 iterations)
 learning_rate: 5.0e-6
+lr_scheduler_type: constant
+warmup_steps: 0
 num_train_epochs: 1
-max_steps: 1000            # leave -1 if using epochs
-gradient_accumulation_steps: 30
+max_steps: 1000
+gradient_accumulation_steps: 15
 
 # Logging / output
 project: es_conciseness
 entity: itamarf
 output_dir: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO
-save_steps: 200             # we'll save on epoch end
+save_steps: 200
 logging_steps: 5
 
-# DeepSpeed (optional): path to a ds_config.json if you want ZeRO-3. Leave empty to skip.
-deepspeed_config: ""
-
-# Sweep
+# Sweep (Table 2 focuses on β)
 betas: [0.0, 0.01, 0.0167, 0.0464]
 seeds: [11, 22, 33, 44]
 
-# Reward config for conciseness
-reward:
-  # target length in tokens used to scale reward; shorter than this is better but we guard against empty/garbage
-  target_len: 20
-  min_alnum_frac: 0.2    # if fewer than this fraction of chars are alphanumeric -> reward=0 (anti-hack)
-  empty_penalty: 0.0     # set to 0 (hard zero) for empty/whitespace completions
-  clip_min: 0.0
-  clip_max: 1.0
-
-# Trainer niceties
-scale_rewards: batch     # 'group' | 'batch' | 'none'
-loss_type: dr_grpo
-mask_truncated_completions: false
+# Plain GRPO (Table 2);
+loss_type: grpo
