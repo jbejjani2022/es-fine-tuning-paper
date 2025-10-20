@@ -19,7 +19,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', type=str, default='Qwen/Qwen2.5-3B-Instruct')
-parser.add_argument('--hf_cache_dir', type=str, default='huggingface_cache')
+parser.add_argument('--hf_cache_dir', type=str, default='hf_cache')
 parser.add_argument('--precision', type=str, default='bf16')
 parser.add_argument('--gpu_threads', type=int, default=4, help='Number of parallel threads per GPU')
 parser.add_argument('--verbose', action='store_true', help='Print verbose logs')

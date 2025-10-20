@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=es_fine_tuning_countdown
+#SBATCH --job-name=es_fine_tuning_conciseness
 #SBATCH --account=kempner_sham_lab
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
@@ -32,13 +32,12 @@ accelerate launch \
     --num_processes 4 \
     --num_machines 1 \
     --machine_rank 0 \
-    countdown/es_fine-tuning_countdown_iid.py \
-    --data_sample 200 \
+    conciseness/es_fine-tuning_conciseness_iid.py \
     --model_name Qwen/Qwen2.5-3B-Instruct \
     --gpu_threads 2 \
-    --max_new_tokens 1024 \
-    --iterations 500 \
-    --save_steps 250 \
+    --max_new_tokens 100 \
+    --iterations 1000 \
+    --save_steps 200 \
     --population_size 30 \
     --sigma 0.001 \
     --alpha 0.0005 \

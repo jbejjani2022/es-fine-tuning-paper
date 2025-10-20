@@ -13,39 +13,70 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 import math
 import gc
+import json
 
 logging.set_verbosity_error()
 torch.backends.cuda.matmul.allow_tf32 = True
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--model_name', type=str, default='Qwen/Qwen2.5-3B-Instruct')
-parser.add_argument('--hf_cache_dir', type=str, default='huggingface_cache')
+parser.add_argument('--hf_cache_dir', type=str, default='hf_cache')
 parser.add_argument('--precision', type=str, default='bf16')
 parser.add_argument('--gpu_threads', type=int, default=4, help='Number of parallel threads per GPU')
 parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
+parser.add_argument('--save_steps', type=int, default=100, help='Save checkpoint every n iterations')
+parser.add_argument('--iterations', type=int, default=1000, help='Number of ES iterations (generations)')
+parser.add_argument('--population_size', type=int, default=30, help='Population size (number of perturbations per iteration)')
+parser.add_argument('--sigma', type=float, default=0.001, help='Standard deviation for weight perturbations (noise scale)')
+parser.add_argument('--alpha', type=float, default=0.0005, help='Learning rate')
+parser.add_argument('--initial_seed', type=int, default=33, help='Initial random seed')
+parser.add_argument('--do_sample', default=False, action='store_true', help='Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)')
+parser.add_argument('--max_new_tokens', type=int, default=100, help='Maximum number of tokens allowed to be generated')
 args = parser.parse_args()
 
 
 # Hyperparameters for ES
-NUM_ITERATIONS = 1000             # Number of ES iterations (generations)
-POPULATION_SIZE = 30              # Population size (number of perturbations per iteration)
-SIGMA = 0.001                     # Standard deviation for weight perturbations (noise scale)
-ALPHA = 0.0005                    # Learning rate
-max_new_tokens = 100              # Maximum number of tokens allowed to be generated
-do_sample = False                 # Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)
-initial_seed = 33                 # Initial random seed
+NUM_ITERATIONS = args.iterations             # Number of ES iterations (generations)
+POPULATION_SIZE = args.population_size       # Population size (number of perturbations per iteration)
+SIGMA = args.sigma                           # Standard deviation for weight perturbations (noise scale)
+ALPHA = args.alpha                           # Learning rate
+max_new_tokens = args.max_new_tokens         # Maximum number of tokens allowed to be generated
+do_sample = args.do_sample                   # Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)
+initial_seed = args.initial_seed             # Initial random seed
 
 
-# --- Dummy Dataset and Reward Function ---
-# In practice, define a set of input reasoning tasks with desired targets.
-dataset = [
-    ("Solve: 3 + 5 =", "8"),
-    ("If all birds can fly and penguins are birds, can penguins fly?", "No"),
-]
+# --- Load Dataset from JSONL File ---
+# Load training data from conciseness/data/train.jsonl
+dataset = []
+with open('conciseness/data/train.jsonl', 'r') as f:
+    for line in f:
+        if line.strip():  # Skip empty lines
+            data = json.loads(line)
+            dataset.append((data['question'], data['answer']))
 
 def compute_reward(generated_text, target_text):
     # Negative absolute difference in length
     return -abs(len(generated_text) - len(target_text))
+
+def get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False):
+    """Generate consistent save directory path for checkpoints and final model"""
+    question_num = dataset_size
+    suffix = "final" if is_final else "checkpoint"
+    save_dir = os.path.join(
+        "checkpoints",
+        f"conciseness/{model_name}/{initial_seed}",
+        f"es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{iteration}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_{suffix}"
+    )
+    return save_dir
+
+def save_model_checkpoint(model, tokenizer, iteration, model_name, initial_seed, args, dataset_size):
+    """Save model checkpoint at specified iteration"""
+    save_dir = get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_final=False)
+    os.makedirs(save_dir, exist_ok=True)
+    print(f"Saving checkpoint at iteration {iteration} to {save_dir}...")
+    model.save_pretrained(save_dir)
+    tokenizer.save_pretrained(save_dir)
+    print(f"Checkpoint saved successfully.")
 
 def force_memory_cleanup():
     """Force aggressive memory cleanup"""
@@ -339,18 +370,22 @@ def main():
             print(f"Iteration {iteration + 1}/{NUM_ITERATIONS}, Time: {iter_time:.2f}s, Mean: {mean_reward:.2f}, Min: {min_reward:.2f}, Max: {max_reward:.2f}")
             print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
 
+            # Save checkpoint every save_steps iterations
+            if (iteration + 1) % args.save_steps == 0:
+                save_model_checkpoint(original_model, tokenizer, iteration + 1, model_name, initial_seed, args, len(dataset))
+
     total_time = time.time() - training_start_time
 
 
-    # Save the fine-tuned model weights.
+    # Save the final fine-tuned model weights.
     if accelerator.is_main_process:
         print(f"Training completed in {total_time:.2f}s ({total_time/60:.2f} minutes)")
-        question_num = len(dataset)
-        save_dir = f"finetuned_{model_name}_es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{NUM_ITERATIONS}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_correct"
-        print(f"Saving model to {save_dir}...")
+        save_dir = get_save_dir(model_name, initial_seed, NUM_ITERATIONS, len(dataset), args, is_final=True)
+        os.makedirs(save_dir, exist_ok=True)
+        print(f"Saving final model to {save_dir}...")
         original_model.save_pretrained(save_dir)
         tokenizer.save_pretrained(save_dir)
-        print(f"Model saved successfully.")
+        print(f"Final model saved successfully.")
 
 if __name__ == "__main__":
     os.environ["PYTHONWARNINGS"] = "ignore"

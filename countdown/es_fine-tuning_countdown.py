@@ -25,17 +25,24 @@ parser.add_argument('--precision', type=str, default='bf16')
 parser.add_argument('--gpu_threads', type=int, default=4, help='Number of parallel threads per GPU')
 parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
 parser.add_argument('--data_sample', type=int, default=1000, help='Number of data samples to use for training')
+parser.add_argument('--max_new_tokens', type=int, default=1024, help='Maximum number of tokens allowed to be generated')
+parser.add_argument('--save_steps', type=int, default=100, help='Save checkpoint every n iterations')
+parser.add_argument('--iterations', type=int, default=1000, help='Number of ES iterations (generations)')
+parser.add_argument('--population_size', type=int, default=30, help='Population size (number of perturbations per iteration)')
+parser.add_argument('--sigma', type=float, default=0.001, help='Standard deviation for weight perturbations (noise scale)')
+parser.add_argument('--alpha', type=float, default=0.0005, help='Learning rate')
+parser.add_argument('--initial_seed', type=int, default=33, help='Initial random seed')
+parser.add_argument('--do_sample', default=False, action='store_true', help='Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)')
 args = parser.parse_args()
 
 
 # Hyperparameters for ES
-NUM_ITERATIONS = 1000             # Number of ES iterations (generations)
-POPULATION_SIZE = 30              # Population size (number of perturbations per iteration)
-SIGMA = 0.001                     # Standard deviation for weight perturbations (noise scale)
-ALPHA = 0.0005                    # Learning rate
-max_new_tokens = 1024              # Maximum number of tokens allowed to be generated
-do_sample = False                 # Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)
-initial_seed = 33                 # Initial random seed
+NUM_ITERATIONS = args.iterations             # Number of ES iterations (generations)
+POPULATION_SIZE = args.population_size       # Population size (number of perturbations per iteration)
+SIGMA = args.sigma                           # Standard deviation for weight perturbations (noise scale)
+ALPHA = args.alpha                           # Learning rate
+do_sample = args.do_sample                   # Whether sampling is allowed in generating tokens, default to be not allowed (greedy decoding for ES)
+initial_seed = args.initial_seed             # Initial random seed
 
 
 # Import countdown reward function
@@ -77,7 +84,7 @@ def evaluate_model(model, tokenizer, input_text, target_text, accelerator, seed_
     input_ids = tokenized_inputs["input_ids"].to(accelerator.device)
     attention_mask = tokenized_inputs["attention_mask"].to(accelerator.device)
     with torch.inference_mode():
-        outputs = model.generate(input_ids, attention_mask=attention_mask, max_new_tokens=max_new_tokens, do_sample=do_sample)
+        outputs = model.generate(input_ids, attention_mask=attention_mask, max_new_tokens=args.max_new_tokens, do_sample=do_sample)
         if torch.cuda.is_available():
             torch.cuda.synchronize(accelerator.device)
 
@@ -229,6 +236,7 @@ def main():
             cache_dir=hf_cache_dir,
             device_map={"": accelerator.process_index},  # Assign devices explicitly
             torch_dtype=torch.float16 if args.precision == 'fp16' else (torch.bfloat16 if args.precision == 'bf16' else torch.float32),
+            attn_implementation="sdpa",
         ))
         # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, cache_dir=hf_cache_dir)
@@ -379,7 +387,7 @@ def main():
             print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
 
             # Save checkpoint every 100 iterations
-            if (iteration + 1) % 100 == 0:
+            if (iteration + 1) % args.save_steps == 0:
                 save_model_checkpoint(original_model, tokenizer, iteration + 1, model_name, initial_seed, args, len(dataset))
 
     total_time = time.time() - training_start_time
