@@ -6,13 +6,13 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=4
-#SBATCH --time=12:00:00
+#SBATCH -t 3-00:00
 #SBATCH --mem=256G
 #SBATCH -o output/job.%N.%j.out          # STDOUT
 #SBATCH -e error/job.%N.%j.err           # STDERR
 #SBATCH --mail-user=jbejjani@college.harvard.edu
 #SBATCH --mail-type=ALL
-#SBATCH --array=0-3
+#SBATCH --array=0
 
 # Load modules
 module load python/3.10.13-fasrc01
@@ -25,9 +25,6 @@ mamba activate es
 
 cd ..
 
-# Set PyTorch memory allocator configuration for better memory management
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 accelerate launch \
     --num_processes 4 \
     --num_machines 1 \
@@ -38,7 +35,7 @@ accelerate launch \
     --gpu_threads 2 \
     --max_new_tokens 1024 \
     --iterations 500 \
-    --save_steps 250 \
+    --save_steps 100 \
     --population_size 30 \
     --sigma 0.001 \
     --alpha 0.0005 \

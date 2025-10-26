@@ -12,7 +12,7 @@
 #SBATCH -e error/job.%N.%j.err           # STDERR
 #SBATCH --mail-user=jbejjani@college.harvard.edu
 #SBATCH --mail-type=ALL
-#SBATCH --array=0-3
+#SBATCH --array=0
 
 # Load modules
 module load python/3.10.13-fasrc01
@@ -25,15 +25,12 @@ mamba activate es
 
 cd ..
 
-# Set PyTorch memory allocator configuration for better memory management
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 accelerate launch \
     --num_processes 4 \
     --num_machines 1 \
     --machine_rank 0 \
     conciseness/es_fine-tuning_conciseness_iid.py \
-    --model_name Qwen/Qwen2.5-3B-Instruct \
+    --model_name Qwen/Qwen2.5-7B-Instruct \
     --gpu_threads 2 \
     --max_new_tokens 100 \
     --iterations 1000 \

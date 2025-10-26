@@ -30,6 +30,8 @@ parser.add_argument('--batch_size', type=int, default=4,
                     help='Batch size for evaluation')
 parser.add_argument('--eval_data_path', type=str, default='conciseness/data/eval.jsonl',
                     help='Path to evaluation data file')
+parser.add_argument('--print-examples', action='store_true', default=False,
+                    help='Print one example generation per test sample with its reward')
 args = parser.parse_args()
 
 def compute_reward(generated_text, target_text):
@@ -211,6 +213,7 @@ def main():
     all_kl_divergences = []
     all_rewards = []
     all_answer_token_counts = []
+    examples = []  # Store (question, generated_answer, reward) tuples for printing
     
     for question_idx, (question, target_answer) in enumerate(dataset):
         print(f"Processing question {question_idx + 1}/{len(dataset)}...")
@@ -286,6 +289,10 @@ def main():
                 # Compute reward
                 reward = compute_reward(generated_answer, target_answer)
                 question_rewards.append(reward)
+                
+                # Store first example for each question
+                if args.print_examples and batch_idx == 0 and i == 0:
+                    examples.append((question, generated_answer, reward))
             
             # Clean up
             del input_ids, attention_mask, outputs
@@ -323,6 +330,18 @@ def main():
     print(f"  Std:  {std_reward:.4f}")
     
     print(f"\nTotal samples evaluated: {len(all_kl_divergences)}")
+    
+    # Print examples if requested
+    if args.print_examples:
+        print("\n" + "="*80)
+        print("EXAMPLE GENERATIONS (1 per test sample)")
+        print("="*80)
+        for idx, (question, generated_answer, reward) in enumerate(examples):
+            print(f"\n--- Example {idx + 1}/{len(examples)} ---")
+            print(f"Question: {question}")
+            print(f"Generated Answer: {generated_answer}")
+            print(f"Reward: {reward:.4f}")
+    
     print("="*80)
 
 if __name__ == "__main__":

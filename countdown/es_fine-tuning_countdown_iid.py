@@ -64,7 +64,7 @@ def get_save_dir(model_name, initial_seed, iteration, dataset_size, args, is_fin
     suffix = "final" if is_final else "checkpoint"
     save_dir = os.path.join(
         "checkpoints",
-        f"countdown/{model_name}/{initial_seed}",
+        f"countdown/{model_name}/{initial_seed}/max_tokens_{args.max_new_tokens}",
         f"es_random_seed{initial_seed}_pop{POPULATION_SIZE}_iter{iteration}_sigma{SIGMA}_alpha{ALPHA}_{args.precision}_threads{args.gpu_threads}_question_num{question_num}_{suffix}"
     )
     return save_dir
