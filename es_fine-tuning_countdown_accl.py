@@ -212,7 +212,7 @@ def main(args):
             except StopIteration:
                 break
             # Add exploration noise
-            ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(seed, args.sigma, 1.0, False)))
+            ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(seed, args.sigma, False)))
             handle, start_ts = evaluate_countdown_handle(llm, task_datas)
             inflight[handle] = {
                 "engine": llm,
@@ -245,7 +245,7 @@ def main(args):
             except StopIteration:
                 continue
 
-            ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(next_seed, args.sigma, 1.0, False)))
+            ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(next_seed, args.sigma, False)))
             handle, start_ts = evaluate_countdown_handle(llm, task_datas)
             inflight[handle] = {
                 "engine": llm,
@@ -282,7 +282,7 @@ def main(args):
         handles = []
         for seed, coeff in per_seed_coeffs:
             # Use sigma_or_scale=1.0 so the applied scale is `coeff`
-            handles.append(engines[0].collective_rpc.remote("perturb_self_weights", args=(seed, 1.0, coeff, False)))
+            handles.append(engines[0].collective_rpc.remote("perturb_self_weights", args=(seed, coeff, False)))
         ray.get(handles)
         print(f"Applied perturbations in {time.time() - perturb_start}s")
         writer.add_scalar("time/perturbation_application", time.time() - perturb_start, i)

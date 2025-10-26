@@ -20,8 +20,8 @@ class WorkerExtension:
     - save_self_weights_to_disk(filepath)
     """
 
-    def perturb_self_weights(self, seed, sigma_or_scale, coeff=1.0, negate=False):
-        scale = float(sigma_or_scale) * float(coeff)
+    def perturb_self_weights(self, seed, sigma_or_scale, negate=False):
+        scale = float(sigma_or_scale)
         sign = -1.0 if negate else 1.0
         for _, p in self.model_runner.model.named_parameters():
             gen = torch.Generator(device=p.device)
