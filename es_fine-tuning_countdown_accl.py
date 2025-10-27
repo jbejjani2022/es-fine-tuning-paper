@@ -41,6 +41,7 @@ def parse_args():
     parser.add_argument("--num_iterations", type=int, default=NUM_ITERATIONS)
     parser.add_argument("--experiment_dir", type=str, default=EXPERIMENT_DIR)
     parser.add_argument("--cuda_devices", type=str, default="0,1,2,3")
+    parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
     parser.add_argument(
         "--global_seed",
         type=int,
@@ -253,7 +254,8 @@ def main(args):
                 "seed": next_seed,
                 "start_ts": start_ts,
             }
-            print(f"Scheduled seed {next_seed} on engine {meta['engine_idx']}")
+            if args.verbose:
+                print(f"Scheduled seed {next_seed} on engine {meta['engine_idx']}")
 
         # Normalize rewards
         all_avg_rewards = [v["avg_reward"] for v in seeds_perf.values()]
@@ -265,7 +267,8 @@ def main(args):
         print(f"Mean reward: {mean_reward}, std: {std_reward}, min: {min_reward}, max: {max_reward}")
         for k in seeds_perf:
             seeds_perf[k]["norm_reward"] = (seeds_perf[k]["avg_reward"] - mean_reward) / (std_reward + 1e-8)
-            print(f"Seed {k} normalized reward: {seeds_perf[k]['norm_reward']}")
+            if args.verbose:
+                print(f"Seed {k} normalized reward: {seeds_perf[k]['norm_reward']}")
 
         writer.add_scalar("reward/mean", mean_reward, i)
         writer.add_scalar("reward/std", std_reward, i)
@@ -284,19 +287,24 @@ def main(args):
             # Use sigma_or_scale=1.0 so the applied scale is `coeff`
             handles.append(engines[0].collective_rpc.remote("perturb_self_weights", args=(seed, coeff, False)))
         ray.get(handles)
-        print(f"Applied perturbations in {time.time() - perturb_start}s")
+        if args.verbose:
+            print(f"Applied perturbations in {time.time() - perturb_start}s")
         writer.add_scalar("time/perturbation_application", time.time() - perturb_start, i)
 
         # Broadcast updated weights from engine 0 to all engines (avoid CPU copies)
         broadcast_start = time.time()
         ray.get([e.collective_rpc.remote("broadcast_all_weights", args=(0,)) for e in engines])
-        print(f"Broadcasted updated weights in {time.time() - broadcast_start}s")
+        if args.verbose:
+            print(f"Broadcasted updated weights in {time.time() - broadcast_start}s")
         writer.add_scalar("time/broadcast", time.time() - broadcast_start, i)
 
         # Logging per-result and timing
-        for res_idx, res in enumerate(results_this_gen):
-            print(f"IDX:{res_idx} Seed {res['seed']} avg_reward: {res['avg_reward']}, time: {res['time']}s")
-        writer.add_scalar("time/iteration", time.time() - total_iter_start, i)
+        if args.verbose:
+            for res_idx, res in enumerate(results_this_gen):
+                print(f"IDX:{res_idx} Seed {res['seed']} avg_reward: {res['avg_reward']}, time: {res['time']}s")
+        total_iter_end = time.time()
+        writer.add_scalar("time/iteration", total_iter_end - total_iter_start, i)
+        print(f"wall clock time for iteration {i}: {total_iter_end - total_iter_start}s")
         print(f"=== Generation {i} finished ===\n")
 
     # Save final model weights (all engines are in sync; save from engine 0)
