@@ -19,7 +19,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 from vllm.utils import get_ip, get_open_port
 
-from countdown.countdown_task import reward_function
+from countdown_task import reward_function
 
 # Default Hyperparameters
 SIGMA = 0.001
@@ -39,11 +39,15 @@ def parse_args():
     parser.add_argument("--population_size", type=int, default=POPULATION_SIZE)
     parser.add_argument("--num_engines", type=int, default=NUM_ENGINES)
     parser.add_argument("--num_iterations", type=int, default=NUM_ITERATIONS)
+    parser.add_argument("--max_tokens", type=int, default=1024)
     parser.add_argument("--experiment_dir", type=str, default=EXPERIMENT_DIR)
     parser.add_argument("--cuda_devices", type=str, default="0,1,2,3")
+    parser.add_argument("--data_sample", type=int, default=200)
     parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
+    parser.add_argument('--save_steps', type=int, default=100, help='Save checkpoint every n iterations')
     parser.add_argument(
         "--global_seed",
+        default=0,
         type=int,
         help="Global random seed",
     )
@@ -59,6 +63,36 @@ def parse_args():
         torch.cuda.manual_seed_all(args.global_seed)
 
     return args
+
+def get_save_dir(model_name, global_seed, iteration, data_sample, args, is_final=False):
+    """Generate consistent save directory path for checkpoints and final model"""
+    suffix = "final" if is_final else "checkpoint"
+    save_dir = os.path.join(
+        "checkpoints",
+        f"countdown_accl/{model_name}/{global_seed}/max_tokens_{args.max_tokens}",
+        f"es_random_seed{global_seed}_pop{args.population_size}_iter{iteration}_sigma{args.sigma}_alpha{args.alpha}_engines{args.num_engines}_question_num{data_sample}_{suffix}"
+    )
+    return save_dir
+
+def save_model_checkpoint(engine, tokenizer, iteration, model_name, global_seed, data_sample, args, is_final=False):
+    """Save model checkpoint at specified iteration"""
+    save_dir = get_save_dir(model_name, global_seed, iteration, data_sample, args, is_final=is_final)
+    os.makedirs(save_dir, exist_ok=True)
+    checkpoint_type = "final model" if is_final else "checkpoint"
+    print(f"Saving {checkpoint_type} at iteration {iteration} to {save_dir}...")
+    
+    # Save model weights
+    weights_path = f"{save_dir}/pytorch_model.pth"
+    ray.get(
+        engine.collective_rpc.remote(
+            "save_self_weights_to_disk", args=(weights_path,)
+        )
+    )
+    
+    # Save tokenizer
+    tokenizer.save_pretrained(save_dir)
+    print(f"{checkpoint_type.capitalize()} saved successfully.")
+    return save_dir
 
 class ESNcclLLM(LLM):
     def __init__(self, *args, **kwargs):
@@ -95,12 +129,12 @@ def launch_engines(num_engines, model_name):
     ]
     return engines, pgs
 
-def evaluate_countdown_handle(llm, task_datas):
+def evaluate_countdown_handle(llm, task_datas, max_tokens=1024):
     prompts = [d["context"] for d in task_datas]
     sampling_params = SamplingParams(
         temperature=0.0,
         seed=42,
-        max_tokens=1024,
+        max_tokens=max_tokens,
     )
     handle = llm.generate.remote(prompts, sampling_params, use_tqdm=False)
     return handle, time.time()
@@ -150,10 +184,10 @@ def main(args):
         torch.cuda.empty_cache()
 
     # Load data
-    data_path = "countdown/data/countdown.json"
+    data_path = os.path.join(os.path.dirname(__file__), 'data/countdown.json')
     with open(data_path, "r") as f:
         task_datas = json.load(f)
-    task_datas = task_datas[:200]
+    task_datas = task_datas[:args.data_sample]
 
     # Launch engines
     engines, pgs = launch_engines(args.num_engines, base_model_path)
@@ -214,7 +248,7 @@ def main(args):
                 break
             # Add exploration noise
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas, max_tokens=args.max_tokens)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": eng_idx,
@@ -247,7 +281,7 @@ def main(args):
                 continue
 
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(next_seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas, max_tokens=args.max_tokens)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": meta["engine_idx"],
@@ -306,16 +340,20 @@ def main(args):
         writer.add_scalar("time/iteration", total_iter_end - total_iter_start, i)
         print(f"wall clock time for iteration {i}: {total_iter_end - total_iter_start}s")
         print(f"=== Generation {i} finished ===\n")
+        
+        # Save checkpoint every save_steps iterations
+        if (i + 1) % args.save_steps == 0:
+            save_model_checkpoint(
+                engines[0], tokenizer, i + 1, args.model_name, args.global_seed, 
+                args.data_sample, args, is_final=False
+            )
 
     # Save final model weights (all engines are in sync; save from engine 0)
-    final_model_path = f"{model_saves_dir}/final_model_iteration_{args.num_iterations}"
-    os.makedirs(final_model_path, exist_ok=True)
-    ray.get(
-        engines[0].collective_rpc.remote(
-            "save_self_weights_to_disk", args=(f"{final_model_path}/pytorch_model.pth",)
-        )
+    print(f"\nTraining completed! Saving final model...")
+    save_model_checkpoint(
+        engines[0], tokenizer, args.num_iterations, args.model_name, args.global_seed,
+        args.data_sample, args, is_final=True
     )
-    print(f"Final model weights saved to {final_model_path}.")
 
     cleanup()
 

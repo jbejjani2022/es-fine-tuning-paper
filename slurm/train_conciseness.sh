@@ -12,7 +12,7 @@
 #SBATCH -e error/job.%N.%j.err           # STDERR
 #SBATCH --mail-user=jbejjani@college.harvard.edu
 #SBATCH --mail-type=ALL
-#SBATCH --array=0
+#SBATCH --array=0-3
 
 # Load modules
 module load python/3.10.13-fasrc01
@@ -32,9 +32,9 @@ accelerate launch \
     conciseness/es_fine-tuning_conciseness_iid.py \
     --model_name Qwen/Qwen2.5-7B-Instruct \
     --gpu_threads 1 \
-    --max_new_tokens 100 \
+    --max_new_tokens 128 \
     --iterations 1000 \
-    --save_steps 200 \
+    --save_steps 500 \
     --population_size 30 \
     --sigma 0.001 \
     --alpha 0.0005 \
