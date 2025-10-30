@@ -3,7 +3,10 @@ This repo contains the source code for the paper "Evolution Strategies at Scale:
 
 Feel free to join the ES fine-tuning forum in [Discussions](https://github.com/VsonicV/es-fine-tuning-paper/discussions).
 
-Note: we are still actively adding more experimental codes into this repo.
+### News
+10/27/2025: :fire::fire::fire: An accelerated version with **10X+ speed-up** in running time is added to the repo!  See [here](https://github.com/VsonicV/es-fine-tuning-paper?tab=readme-ov-file#accelerated-version-10x-speed-up). :rocket::rocket::rocket:
+
+Note: we are still actively adding more experimental codes into this repo. We expect breaking change to the accelerated implementations.
 
 ## Setup
 Create a virtual environment with python version >= 3.10 and activate it
@@ -16,6 +19,7 @@ From the root of the repository run following command to install all the relevan
 ```bash
 pip install -r requirement.txt
 ```
+
 
 ## Usage
 For running the main ES code on conciseness fine-tuning
@@ -32,7 +36,7 @@ accelerate launch \
 
 `--num_processes` specifies the number of GPUs to use and `--gpu_threads` specifies the number of threads inside each GPU. The total number of parallel evaluations is thereby equal to `num_processes`*`gpu_threads`.
 
-For running the main ES code on countdown task
+For running the main ES code on the Countdown task
 ```bash
 accelerate launch \
     --num_processes 4 \
@@ -44,7 +48,8 @@ accelerate launch \
     --gpu_threads 1
 ```
 
-## Other Parameters
+
+### Other Parameters
 
 - `--gpu_ids`: Specify which GPUs to use (CUDA device id), argument for `accelerate launch`
 - `--model_name`: HuggingFace model to fine-tune
@@ -52,6 +57,39 @@ accelerate launch \
 - `--precision`: Model precision, default to be `bf16`
 - `--verbose`: Enable detailed logging if this argument is present in the command line
 
+Note: The original implementation uses a partially correlated noise. To use complete i.i.d. noise, please use `es_fine-tuning_conciseness_iid.py` and `countdown/es_fine-tuning_countdown_iid.py` instead. See [here](https://github.com/VsonicV/es-fine-tuning-paper/discussions/7) for more details.
+
+## Accelerated Version (10X+ Speed-up)
+
+If you are using the latest accelerated version `es-fine-tuning_countdown_accl.py`, please also install the `vllm` and `tensorboard` by:
+```bash
+pip install vllm==0.11.0
+pip install tensorboard
+```
+
+For running the accelerated version on the Countdown task:
+```bash
+# Single-GPU quickstart
+python es_fine-tuning_countdown_accl.py \
+  --model_name Qwen/Qwen2.5-3B-Instruct \
+  --cuda_devices 0 \
+  --num_engines 1 \
+  --population_size 30 \
+  --num_iterations 1000
+
+# Multi-GPU run (one vLLM engine per GPU)
+python es_fine-tuning_countdown_accl.py \
+  --model_name Qwen/Qwen2.5-3B-Instruct \
+  --cuda_devices 0,1,2,3 \
+  --num_engines 4 \
+  --population_size 30 \
+  --num_iterations 1000 \
+  --sigma 0.001 \
+  --alpha 0.0005 \
+  --experiment_dir es-ft-experiment
+```
+
+On preliminary 4xH100 setting, accelerated version achieves ~10 times speed-up with similar convergence rate.
 
 ## Citation
 
