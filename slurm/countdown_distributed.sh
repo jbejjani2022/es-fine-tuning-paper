@@ -32,7 +32,7 @@ accelerate launch \
     countdown/es_fine-tuning_countdown_iid.py \
     --data_sample 200 \
     --model_name Qwen/Qwen2.5-3B-Instruct \
-    --gpu_threads 2 \
+    --gpu_threads 1 \
     --max_new_tokens 1024 \
     --iterations 500 \
     --save_steps 100 \

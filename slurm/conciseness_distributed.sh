@@ -31,7 +31,7 @@ accelerate launch \
     --machine_rank 0 \
     conciseness/es_fine-tuning_conciseness_iid.py \
     --model_name Qwen/Qwen2.5-7B-Instruct \
-    --gpu_threads 2 \
+    --gpu_threads 1 \
     --max_new_tokens 100 \
     --iterations 1000 \
     --save_steps 200 \
