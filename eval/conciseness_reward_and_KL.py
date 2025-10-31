@@ -1,11 +1,13 @@
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.utils import logging
-import argparse
 import os
 import json
 import numpy as np
 import sys
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.utils import logging
+import argparse
+from datetime import datetime
+
 
 logging.set_verbosity_error()
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -32,6 +34,16 @@ parser.add_argument('--eval_data_path', type=str, default='conciseness/data/eval
                     help='Path to evaluation data file')
 parser.add_argument('--print-examples', action='store_true', default=False,
                     help='Print one example generation per test sample with its reward')
+parser.add_argument('--output_json', type=str, default=None,
+                    help='Path to save results (.json or .jsonl). If ends with .jsonl, appends a line.')
+parser.add_argument('--seed', type=int, default=None,
+                    help='Seed for random number generator')
+parser.add_argument('--beta', type=float, default=None,
+                    help='Beta for GRPO')
+parser.add_argument('--temperature', type=float, default=1.0,
+                    help='Temperature for sampling')
+parser.add_argument('--top_p', type=float, default=1.0,
+                    help='Top-p for sampling')
 args = parser.parse_args()
 
 def compute_reward(generated_text, target_text):
@@ -310,6 +322,8 @@ def main():
                     attention_mask=attention_mask,
                     max_new_tokens=args.max_new_tokens,
                     do_sample=args.do_sample,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
                     pad_token_id=tokenizer.pad_token_id
                 )
                 if torch.cuda.is_available():
@@ -394,6 +408,9 @@ def main():
     mean_reward = np.mean(all_rewards)
     std_reward = np.std(all_rewards)
     
+    normalized_mean_reward = (mean_reward + 2000) / 2001
+    normalized_std_reward = std_reward / 2001
+
     print(f"\nKL Divergence - Full Vocabulary (Fine-tuned || Baseline):")
     print(f"  Mean: {mean_kl:.6f}")
     print(f"  Std:  {std_kl:.6f}")
@@ -409,7 +426,9 @@ def main():
     
     print(f"\nReward (Length-based):")
     print(f"  Mean: {mean_reward:.4f}")
+    print(f"  Normalized mean: {normalized_mean_reward:.4f}")
     print(f"  Std:  {std_reward:.4f}")
+    print(f"  Normalized std: {normalized_std_reward:.4f}")
     
     print(f"\nTotal samples evaluated: {len(all_kl_divergences)}")
     
@@ -425,6 +444,65 @@ def main():
             print(f"Reward: {reward:.4f}")
     
     print("="*80)
+
+    # Prepare results payload
+    results = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "model": args.model,
+        "seed": args.seed,
+        "beta": args.beta,
+        "baseline_model_name": args.baseline_model_name,
+        "eval_data_path": data_path,
+        "precision": args.precision,
+        "max_new_tokens": args.max_new_tokens,
+        "do_sample": args.do_sample,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "num_samples": args.num_samples,
+        "batch_size": args.batch_size,
+        "total_samples_evaluated": int(len(all_kl_divergences)),
+        "kl": {
+            "mean": float(mean_kl),
+            "std": float(std_kl),
+            "total_sum": float(total_kl_sum),
+            "mean_per_token": float(mean_kl_per_token),
+            "total_answer_tokens": int(total_answer_tokens),
+        },
+        "observed_token_kl": {
+            "mean": float(mean_obs_kl),
+            "std": float(std_obs_kl),
+            "total_sum": float(total_obs_kl_sum),
+            "mean_per_token": float(mean_obs_kl_per_token),
+            "total_answer_tokens": int(total_answer_tokens),
+        },
+        "reward": {
+            "mean": float(mean_reward),
+            "std": float(std_reward),
+            "normalized": {
+                "mean": float(normalized_mean_reward),
+                "std": float(normalized_std_reward),
+            },
+        },
+        "slurm": {
+            "job_id": os.environ.get("SLURM_JOB_ID"),
+            "array_task_id": os.environ.get("SLURM_ARRAY_TASK_ID"),
+        },
+    }
+
+    # Decide output path and persist
+    default_output = os.path.join(os.path.dirname(__file__), '..', 'logs', f'conciseness_reward_and_KL_results_beta{args.beta}_{args.seed}.jsonl')
+    output_path = args.output_json if args.output_json else default_output
+    os.makedirs(os.path.abspath(os.path.join(output_path, os.pardir)), exist_ok=True)
+    try:
+        if output_path.endswith('.jsonl'):
+            with open(output_path, 'a') as f:
+                f.write(json.dumps(results) + "\n")
+        else:
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+        print(f"Saved results to {output_path}")
+    except Exception as e:
+        print(f"Failed to save results to {output_path}: {e}")
 
 if __name__ == "__main__":
     main()
