@@ -50,54 +50,6 @@ def compute_reward(generated_text, target_text):
     """Compute reward based on length difference (from es_fine-tuning_conciseness_iid.py)"""
     return -abs(len(generated_text) - len(target_text))
 
-def compute_kl_divergence_teacher_forced(model_ft, model_base, tokenizer, question, answer, device):
-    """
-    Compute KL divergence using teacher-forcing.
-    KL[θ_FT || θ_BASE] over the full vocabulary for the answer tokens given the question context.
-    """
-    # Tokenize question and answer separately
-    question_tokens = tokenizer(question, return_tensors="pt", add_special_tokens=True)
-    full_text = question + answer
-    full_tokens = tokenizer(full_text, return_tensors="pt", add_special_tokens=True)
-    
-    question_length = question_tokens["input_ids"].shape[1]
-    
-    input_ids = full_tokens["input_ids"].to(device)
-    attention_mask = full_tokens["attention_mask"].to(device)
-    
-    # Get logits from both models
-    with torch.inference_mode():
-        outputs_ft = model_ft(input_ids=input_ids, attention_mask=attention_mask)
-        outputs_base = model_base(input_ids=input_ids, attention_mask=attention_mask)
-    
-    logits_ft = outputs_ft.logits
-    logits_base = outputs_base.logits
-    
-    # We only care about the answer tokens
-    # The answer starts at position question_length-1 (since we're predicting the next token)
-    # and goes to the end
-    answer_start_idx = question_length - 1
-    answer_logits_ft = logits_ft[0, answer_start_idx:-1, :]  # Exclude last position (no next token to predict)
-    answer_logits_base = logits_base[0, answer_start_idx:-1, :]
-    
-    # Get the actual answer token ids
-    answer_token_ids = input_ids[0, question_length:]  # The tokens we're predicting
-    
-    if answer_token_ids.shape[0] == 0:
-        return 0.0  # No answer tokens to evaluate
-    
-    # Compute log probabilities
-    log_probs_ft = torch.nn.functional.log_softmax(answer_logits_ft, dim=-1)
-    log_probs_base = torch.nn.functional.log_softmax(answer_logits_base, dim=-1)
-    
-    # Compute full-vocabulary KL(FT || BASE) per position and sum across answer positions
-    # KL(p||q) = sum_y p(y) * (log p(y) - log q(y))
-    prob_ft_full = torch.exp(log_probs_ft)
-    kl_per_position = (prob_ft_full * (log_probs_ft - log_probs_base)).sum(dim=-1)
-    kl_sum = kl_per_position.sum().item()
-    
-    return kl_sum
-
 def compute_kl_divergence_from_ids(model_ft, model_base, input_ids_1d, answer_start_idx, device):
     """
     Compute full-vocabulary KL(FT || BASE) over generated answer tokens given a full sequence of token ids.
