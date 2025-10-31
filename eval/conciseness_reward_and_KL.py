@@ -22,9 +22,9 @@ parser.add_argument('--hf_cache_dir', type=str, default='hf_cache',
                     help='HuggingFace cache directory')
 parser.add_argument('--precision', type=str, default='bf16', choices=['fp16', 'bf16', 'fp32'],
                     help='Model precision')
-parser.add_argument('--max_new_tokens', type=int, default=1024,
+parser.add_argument('--max_new_tokens', type=int, default=128,
                     help='Maximum number of tokens to generate')
-parser.add_argument('--do_sample', action='store_true', default=False,
+parser.add_argument('--do_sample', action='store_true', default=True,
                     help='Enable sampling vs greedy decoding')
 parser.add_argument('--num_samples', type=int, default=20,
                     help='Number of responses to generate per prompt')
@@ -310,7 +310,6 @@ def main():
                 input_texts,
                 return_tensors="pt",
                 padding=True,
-                padding_side="left"
             )
             input_ids = tokenized_inputs["input_ids"].to(device)
             attention_mask = tokenized_inputs["attention_mask"].to(device)
@@ -324,7 +323,8 @@ def main():
                     do_sample=args.do_sample,
                     temperature=args.temperature,
                     top_p=args.top_p,
-                    pad_token_id=tokenizer.pad_token_id
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
                 )
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
