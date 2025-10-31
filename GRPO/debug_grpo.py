@@ -2,8 +2,8 @@
 """Debug script to test GRPO generation directly."""
 
 import os
-os.environ['TRANSFORMERS_CACHE'] = '/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface'
-os.environ['HF_HOME'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface"
+import json
+import argparse
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import Dataset
