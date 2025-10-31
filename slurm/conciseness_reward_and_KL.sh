@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=1
-#SBATCH --time=12:00:00
+#SBATCH --time=3:00:00
 #SBATCH --mem=256G
 #SBATCH -o output/job.%N.%j.out          # STDOUT
 #SBATCH -e error/job.%N.%j.err           # STDERR
@@ -28,10 +28,11 @@ cd ..
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 python eval/conciseness_reward_and_KL.py \
-    --model Qwen/Qwen2.5-3B-Instruct \
-    --baseline_model_name Qwen/Qwen2.5-3B-Instruct \
+    --model checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/0/es_random_seed0_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final \
+    --baseline_model_name Qwen/Qwen2.5-7B-Instruct \
     --precision bf16 \
-    --max_new_tokens 100 \
+    --max_new_tokens 128 \
     --num_samples 20 \
     --batch_size 4 \
-    --eval_data_path conciseness/data/eval.jsonl
+    --eval_data_path conciseness/data/eval.jsonl \
+    --print-examples

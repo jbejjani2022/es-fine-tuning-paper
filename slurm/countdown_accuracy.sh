@@ -27,7 +27,10 @@ cd ..
 # Set PyTorch memory allocator configuration for better memory management
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-for model in Qwen/Qwen2.5-0.5B-Instruct Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct Qwen/Qwen2.5-7B-Instruct
+# for model in Qwen/Qwen2.5-0.5B-Instruct Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct Qwen/Qwen2.5-7B-Instruct
+# for model in checkpoints/countdown_max_tokens_128/Qwen/Qwen2.5-3B-Instruct/0/es_random_seed0_pop30_iter500_sigma0.001_alpha0.0005_bf16_threads2_question_num200_final
+# for model in meta-llama/Llama-3.2-1B-Instruct meta-llama/Llama-3.2-3B-Instruct meta-llama/Llama-3.1-8B-Instruct
+for model in checkpoints/countdown/Qwen/Qwen2.5-3B-Instruct/0/max_tokens_512/es_random_seed0_pop30_iter500_sigma0.001_alpha0.0005_bf16_threads2_question_num200_final
 do
     python eval/countdown_accuracy.py \
         --model $model \

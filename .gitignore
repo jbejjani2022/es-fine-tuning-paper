@@ -8,3 +8,6 @@ env/
 Qwen/
 logs/
 wandb/
+model_saves/
+events.*
+data_viz/

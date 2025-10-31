@@ -30,6 +30,8 @@ parser.add_argument('--batch_size', type=int, default=4,
                     help='Batch size for evaluation')
 parser.add_argument('--eval_data_path', type=str, default='conciseness/data/eval.jsonl',
                     help='Path to evaluation data file')
+parser.add_argument('--print-examples', action='store_true', default=False,
+                    help='Print one example generation per test sample with its reward')
 args = parser.parse_args()
 
 def compute_reward(generated_text, target_text):
@@ -114,6 +116,63 @@ def compute_kl_divergence_from_ids(model_ft, model_base, input_ids_1d, answer_st
 
     prob_ft_full = torch.exp(log_probs_ft)
     kl_per_pos = (prob_ft_full * (log_probs_ft - log_probs_base)).sum(dim=-1)
+    return kl_per_pos.sum().item()
+
+def compute_observed_token_kl_from_ids(model_ft, model_base, input_ids_1d, answer_start_idx, device):
+    """
+    Compute observed-token KL divergence following the formula:
+    KL = θ_BASE(y_t | context) / θ_FT(y_t | context) - log(θ_BASE(y_t | context) / θ_FT(y_t | context)) - 1
+    
+    This only evaluates the divergence at the specific tokens that were generated,
+    rather than summing over the entire vocabulary.
+    
+    - input_ids_1d: 1D tensor of token ids representing [prompt || answer]
+    - answer_start_idx: index in the sequence where answer prediction begins
+    """
+    if input_ids_1d.dim() != 1:
+        raise ValueError("input_ids_1d must be a 1D tensor")
+
+    seq_len = input_ids_1d.shape[0]
+    if seq_len - answer_start_idx - 1 <= 0:
+        return 0.0
+
+    input_ids = input_ids_1d.unsqueeze(0).to(device)
+    attention_mask = torch.ones_like(input_ids, device=device)
+
+    with torch.inference_mode():
+        outputs_ft = model_ft(input_ids=input_ids, attention_mask=attention_mask)
+        outputs_base = model_base(input_ids=input_ids, attention_mask=attention_mask)
+
+    # Predict positions for answer tokens
+    start = answer_start_idx
+    logits_ft = outputs_ft.logits[0, start:-1, :]
+    logits_base = outputs_base.logits[0, start:-1, :]
+
+    # Get the actual answer token ids that were generated
+    answer_token_ids = input_ids_1d[start + 1:]  # The tokens we're predicting
+    
+    if answer_token_ids.shape[0] == 0:
+        return 0.0
+
+    log_probs_ft = torch.nn.functional.log_softmax(logits_ft, dim=-1)
+    log_probs_base = torch.nn.functional.log_softmax(logits_base, dim=-1)
+
+    # Extract probabilities only at the observed tokens
+    # log_probs shape: [num_positions, vocab_size]
+    # We want to gather the probability at each observed token
+    indices = answer_token_ids.unsqueeze(1)  # [num_positions, 1]
+    log_prob_ft_observed = log_probs_ft.gather(dim=1, index=indices).squeeze(1)  # [num_positions]
+    log_prob_base_observed = log_probs_base.gather(dim=1, index=indices).squeeze(1)  # [num_positions]
+    
+    prob_ft_observed = torch.exp(log_prob_ft_observed)
+    prob_base_observed = torch.exp(log_prob_base_observed)
+    
+    # KL formula: r - log(r) - 1, where r = p_base / p_ft
+    # Equivalently: p_base/p_ft - log(p_base/p_ft) - 1
+    # = p_base/p_ft - log(p_base) + log(p_ft) - 1
+    ratio = prob_base_observed / prob_ft_observed
+    kl_per_pos = ratio - torch.log(ratio) - 1.0
+    
     return kl_per_pos.sum().item()
 
 def main():
@@ -209,14 +268,17 @@ def main():
     # Generate responses and compute metrics
     print("\nGenerating responses and computing metrics...")
     all_kl_divergences = []
+    all_observed_token_kl = []
     all_rewards = []
     all_answer_token_counts = []
+    examples = []  # Store (question, generated_answer, reward) tuples for printing
     
     for question_idx, (question, target_answer) in enumerate(dataset):
         print(f"Processing question {question_idx + 1}/{len(dataset)}...")
         
         # Generate num_samples responses for this question
         question_kl_divergences = []
+        question_observed_token_kl = []
         question_rewards = []
         question_answer_token_counts = []
         
@@ -279,6 +341,17 @@ def main():
                     device=device,
                 )
                 question_kl_divergences.append(kl_div)
+                
+                # Compute observed-token KL divergence (formula from image)
+                obs_kl_div = compute_observed_token_kl_from_ids(
+                    model_ft=model_ft,
+                    model_base=model_base,
+                    input_ids_1d=full_ids,
+                    answer_start_idx=input_len - 1,
+                    device=device,
+                )
+                question_observed_token_kl.append(obs_kl_div)
+                
                 # Count answer tokens predicted (positions contributing to KL)
                 num_answer_tokens = max(0, full_ids.shape[0] - input_len)
                 question_answer_token_counts.append(int(num_answer_tokens))
@@ -286,6 +359,10 @@ def main():
                 # Compute reward
                 reward = compute_reward(generated_answer, target_answer)
                 question_rewards.append(reward)
+                
+                # Store first example for each question
+                if args.print_examples and batch_idx == 0 and i == 0:
+                    examples.append((question, generated_answer, reward))
             
             # Clean up
             del input_ids, attention_mask, outputs
@@ -294,6 +371,7 @@ def main():
         
         # Aggregate metrics for this question
         all_kl_divergences.extend(question_kl_divergences)
+        all_observed_token_kl.extend(question_observed_token_kl)
         all_rewards.extend(question_rewards)
         all_answer_token_counts.extend(question_answer_token_counts)
     
@@ -308,21 +386,44 @@ def main():
     total_answer_tokens = int(np.sum(all_answer_token_counts))
     mean_kl_per_token = (total_kl_sum / total_answer_tokens) if total_answer_tokens > 0 else float('nan')
     
+    mean_obs_kl = np.mean(all_observed_token_kl)
+    std_obs_kl = np.std(all_observed_token_kl)
+    total_obs_kl_sum = float(np.sum(all_observed_token_kl))
+    mean_obs_kl_per_token = (total_obs_kl_sum / total_answer_tokens) if total_answer_tokens > 0 else float('nan')
+    
     mean_reward = np.mean(all_rewards)
     std_reward = np.std(all_rewards)
     
-    print(f"\nKL Divergence (Fine-tuned || Baseline):")
+    print(f"\nKL Divergence - Full Vocabulary (Fine-tuned || Baseline):")
     print(f"  Mean: {mean_kl:.6f}")
     print(f"  Std:  {std_kl:.6f}")
     print(f"  Total sum over positions: {total_kl_sum:.6f}")
     print(f"  Mean per token (micro-average): {mean_kl_per_token:.6f}")
     print(f"  Total answer tokens: {total_answer_tokens}")
     
+    print(f"\nKL Divergence - Observed Tokens Only (r - log(r) - 1 formula):")
+    print(f"  Mean: {mean_obs_kl:.6f}")
+    print(f"  Std:  {std_obs_kl:.6f}")
+    print(f"  Total sum over positions: {total_obs_kl_sum:.6f}")
+    print(f"  Mean per token (micro-average): {mean_obs_kl_per_token:.6f}")
+    
     print(f"\nReward (Length-based):")
     print(f"  Mean: {mean_reward:.4f}")
     print(f"  Std:  {std_reward:.4f}")
     
     print(f"\nTotal samples evaluated: {len(all_kl_divergences)}")
+    
+    # Print examples if requested
+    if args.print_examples:
+        print("\n" + "="*80)
+        print("EXAMPLE GENERATIONS (1 per test sample)")
+        print("="*80)
+        for idx, (question, generated_answer, reward) in enumerate(examples):
+            print(f"\n--- Example {idx + 1}/{len(examples)} ---")
+            print(f"Question: {question}")
+            print(f"Generated Answer: {generated_answer}")
+            print(f"Reward: {reward:.4f}")
+    
     print("="*80)
 
 if __name__ == "__main__":

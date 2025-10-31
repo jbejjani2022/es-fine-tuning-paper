@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=es_fine_tuning_countdown
+#SBATCH --job-name=es_fine_tuning_conciseness
 #SBATCH --account=kempner_sham_lab
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
@@ -25,20 +25,16 @@ mamba activate es
 
 cd ..
 
-# Set PyTorch memory allocator configuration for better memory management
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 accelerate launch \
     --num_processes 4 \
     --num_machines 1 \
     --machine_rank 0 \
-    countdown/es_fine-tuning_countdown_iid.py \
-    --data_sample 200 \
-    --model_name Qwen/Qwen2.5-3B-Instruct \
-    --gpu_threads 2 \
-    --max_new_tokens 1024 \
-    --iterations 500 \
-    --save_steps 250 \
+    conciseness/es_fine-tuning_conciseness_iid.py \
+    --model_name Qwen/Qwen2.5-7B-Instruct \
+    --gpu_threads 1 \
+    --max_new_tokens 128 \
+    --iterations 1000 \
+    --save_steps 500 \
     --population_size 30 \
     --sigma 0.001 \
     --alpha 0.0005 \
