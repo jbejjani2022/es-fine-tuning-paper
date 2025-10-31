@@ -27,33 +27,16 @@ cd ..
 # Set PyTorch memory allocator configuration for better memory management
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# iterate over betas and seeds and execute in an array job
-BETAS=(0.0)
-SEEDS=(11 22 33 44)
-NB=${#BETAS[@]}
-NS=${#SEEDS[@]}
-IDX=${SLURM_ARRAY_TASK_ID}
-
-BIDX=$(( IDX / NS ))
-SIDX=$(( IDX % NS ))
-BETA=${BETAS[$BIDX]}
-SEED=${SEEDS[$SIDX]}
-
-echo "[SLURM] array index=$IDX -> beta=$BETA seed=$SEED"
-
-MODEL_PATH=/n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_temp_0.7/beta${BETA}_seed${SEED}/
+for model in checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final
+do
 python eval/conciseness_reward_and_KL.py \
-    --model ${MODEL_PATH} \
+    --model $model \
     --baseline_model_name Qwen/Qwen2.5-7B-Instruct \
     --precision bf16 \
     --max_new_tokens 128 \
     --num_samples 20 \
     --batch_size 4 \
+    --do_sample \
     --eval_data_path conciseness/data/eval.jsonl \
-    --print-examples \
-    --output_json logs/conciseness_reward_and_KL_temp_0.7_beta${BETA}_seed${SEED}.json \
-    --seed ${SEED} \
-    --beta ${BETA} \
-    --temperature 1.0 \
-    --top_p 1.0 \
-    --do_sample
+    --print-examples
+done
