@@ -157,7 +157,7 @@ def main(args):
     os.environ.pop("RAY_ADDRESS", None)
     os.environ.pop("RAY_HEAD_IP", None)
     os.environ.pop("RAY_GCS_SERVER_ADDRESS", None)
-    ray.init(address="local", include_dashboard=False, ignore_reinit_error=True)
+    ray.init(address="local", include_dashboard=False, ignore_reinit_error=True, log_to_driver=False)
 
     # Logging
     logging_dir = f"{args.experiment_dir}/countdown_nccl_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -222,6 +222,9 @@ def main(args):
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
 
+    # Record total training start time
+    training_start_time = time.time()
+    
     # Engines start with identical weights (loaded from the same HF checkpoint)
     # For each iteration:
     # - Explore: per-seed add noise -> eval -> subtract noise (GPU-only)
@@ -298,7 +301,6 @@ def main(args):
         min_reward = float(np.min(all_avg_rewards)) if all_avg_rewards else 0.0
         max_reward = float(np.max(all_avg_rewards)) if all_avg_rewards else 0.0
 
-        print(f"Mean reward: {mean_reward}, std: {std_reward}, min: {min_reward}, max: {max_reward}")
         for k in seeds_perf:
             seeds_perf[k]["norm_reward"] = (seeds_perf[k]["avg_reward"] - mean_reward) / (std_reward + 1e-8)
             if args.verbose:
@@ -337,8 +339,13 @@ def main(args):
             for res_idx, res in enumerate(results_this_gen):
                 print(f"IDX:{res_idx} Seed {res['seed']} avg_reward: {res['avg_reward']}, time: {res['time']}s")
         total_iter_end = time.time()
-        writer.add_scalar("time/iteration", total_iter_end - total_iter_start, i)
-        print(f"wall clock time for iteration {i}: {total_iter_end - total_iter_start}s")
+        iter_time = total_iter_end - total_iter_start
+        writer.add_scalar("time/iteration", iter_time, i)
+        
+        # Print iteration summary to stdout
+        print(f"Iteration {i + 1}/{args.num_iterations}, Time: {iter_time:.2f}s, Mean: {mean_reward:.2f}, Min: {min_reward:.2f}, Max: {max_reward:.2f}")
+        if torch.cuda.is_available():
+            print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
         print(f"=== Generation {i} finished ===\n")
         
         # Save checkpoint every save_steps iterations
@@ -348,8 +355,11 @@ def main(args):
                 args.data_sample, args, is_final=False
             )
 
+    total_time = time.time() - training_start_time
+    
     # Save final model weights (all engines are in sync; save from engine 0)
-    print(f"\nTraining completed! Saving final model...")
+    print(f"\nTraining completed in {total_time:.2f}s ({total_time/60:.2f} minutes)")
+    print(f"Saving final model...")
     save_model_checkpoint(
         engines[0], tokenizer, args.num_iterations, args.model_name, args.global_seed,
         args.data_sample, args, is_final=True

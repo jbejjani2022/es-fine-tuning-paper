@@ -12,7 +12,7 @@
 #SBATCH -e error/job.%N.%j.err           # STDERR
 #SBATCH --mail-user=jbejjani@college.harvard.edu
 #SBATCH --mail-type=ALL
-#SBATCH --array=0
+#SBATCH --array=0-3
 
 # Load modules
 module load python/3.10.13-fasrc01
@@ -27,13 +27,13 @@ cd ..
 
 # Multi-GPU run (one vLLM engine per GPU)
 python countdown/es_fine-tuning_countdown_accl.py \
-  --model_name Qwen/Qwen2.5-3B-Instruct \
+  --model_name Qwen/Qwen2.5-1.5B-Instruct \
   --cuda_devices 0,1,2,3 \
   --num_engines 4 \
   --data_sample 200 \
   --population_size 30 \
-  --num_iterations 1000 \
-  --save_steps 100 \
+  --num_iterations 500 \
+  --save_steps 250 \
   --max_tokens 1024 \
   --sigma 0.001 \
   --alpha 0.0005 \
