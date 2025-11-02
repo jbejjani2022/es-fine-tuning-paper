@@ -1,3 +1,6 @@
+# BROKEN CURRENTLY
+# mismatch in how checkpoint weights were saved and how they're loaded
+
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.utils import logging

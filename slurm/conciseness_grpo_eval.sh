@@ -42,7 +42,7 @@ SEED=${SEEDS[$SIDX]}
 echo "[SLURM] array index=$IDX -> beta=$BETA seed=$SEED"
 
 MODEL_PATH=/n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_temp_0.7/beta${BETA}_seed${SEED}/
-python eval/conciseness_reward_and_KL.py \
+python conciseness/conciseness_eval.py \
     --model ${MODEL_PATH} \
     --baseline_model_name Qwen/Qwen2.5-7B-Instruct \
     --precision bf16 \

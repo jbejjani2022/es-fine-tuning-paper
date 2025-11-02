@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=es_fine_tuning_conciseness_reward_and_KL
+#SBATCH --job-name=es_fine_tune_conciseness_eval
 #SBATCH --account=kempner_sham_lab
 #SBATCH --partition=kempner_h100
 #SBATCH --nodes=1
@@ -12,6 +12,7 @@
 #SBATCH -e error/job.%N.%j.err           # STDERR
 #SBATCH --mail-user=jbejjani@college.harvard.edu
 #SBATCH --mail-type=ALL
+#SBATCH --array=0-3
 
 # Load modules
 module load python/3.10.13-fasrc01
@@ -27,16 +28,15 @@ cd ..
 # Set PyTorch memory allocator configuration for better memory management
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-for model in checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final
-do
-python eval/conciseness_reward_and_KL.py \
-    --model $model \
+MODEL_PATH=checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/${SLURM_ARRAY_TASK_ID}/es_random_seed${SLURM_ARRAY_TASK_ID}_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final
+python conciseness/conciseness_eval.py \
+    --model ${MODEL_PATH} \
     --baseline_model_name Qwen/Qwen2.5-7B-Instruct \
     --precision bf16 \
     --max_new_tokens 128 \
     --num_samples 20 \
-    --batch_size 4 \
-    --do_sample \
     --eval_data_path conciseness/data/eval.jsonl \
-    --print-examples
-done
+    --print-examples \
+    --output_json logs/conciseness_eval_seed${SLURM_ARRAY_TASK_ID}.json \
+    --seed $SLURM_ARRAY_TASK_ID \
+    --do_sample

@@ -39,15 +39,11 @@ def parse_args():
     parser.add_argument("--population_size", type=int, default=POPULATION_SIZE)
     parser.add_argument("--num_engines", type=int, default=NUM_ENGINES)
     parser.add_argument("--num_iterations", type=int, default=NUM_ITERATIONS)
-    parser.add_argument("--max_tokens", type=int, default=1024)
     parser.add_argument("--experiment_dir", type=str, default=EXPERIMENT_DIR)
     parser.add_argument("--cuda_devices", type=str, default="0,1,2,3")
-    parser.add_argument("--data_sample", type=int, default=200)
     parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
-    parser.add_argument('--save_steps', type=int, default=100, help='Save checkpoint every n iterations')
     parser.add_argument(
         "--global_seed",
-        default=0,
         type=int,
         help="Global random seed",
     )
@@ -63,36 +59,6 @@ def parse_args():
         torch.cuda.manual_seed_all(args.global_seed)
 
     return args
-
-def get_save_dir(model_name, global_seed, iteration, data_sample, args, is_final=False):
-    """Generate consistent save directory path for checkpoints and final model"""
-    suffix = "final" if is_final else "checkpoint"
-    save_dir = os.path.join(
-        "checkpoints",
-        f"countdown_accl/{model_name}/{global_seed}/max_tokens_{args.max_tokens}",
-        f"es_random_seed{global_seed}_pop{args.population_size}_iter{iteration}_sigma{args.sigma}_alpha{args.alpha}_engines{args.num_engines}_question_num{data_sample}_{suffix}"
-    )
-    return save_dir
-
-def save_model_checkpoint(engine, tokenizer, iteration, model_name, global_seed, data_sample, args, is_final=False):
-    """Save model checkpoint at specified iteration"""
-    save_dir = get_save_dir(model_name, global_seed, iteration, data_sample, args, is_final=is_final)
-    os.makedirs(save_dir, exist_ok=True)
-    checkpoint_type = "final model" if is_final else "checkpoint"
-    print(f"Saving {checkpoint_type} at iteration {iteration} to {save_dir}...")
-    
-    # Save model weights
-    weights_path = f"{save_dir}/pytorch_model.pth"
-    ray.get(
-        engine.collective_rpc.remote(
-            "save_self_weights_to_disk", args=(weights_path,)
-        )
-    )
-    
-    # Save tokenizer
-    tokenizer.save_pretrained(save_dir)
-    print(f"{checkpoint_type.capitalize()} saved successfully.")
-    return save_dir
 
 class ESNcclLLM(LLM):
     def __init__(self, *args, **kwargs):
@@ -129,12 +95,12 @@ def launch_engines(num_engines, model_name):
     ]
     return engines, pgs
 
-def evaluate_countdown_handle(llm, task_datas, max_tokens=1024):
+def evaluate_countdown_handle(llm, task_datas):
     prompts = [d["context"] for d in task_datas]
     sampling_params = SamplingParams(
         temperature=0.0,
         seed=42,
-        max_tokens=max_tokens,
+        max_tokens=1024,
     )
     handle = llm.generate.remote(prompts, sampling_params, use_tqdm=False)
     return handle, time.time()
@@ -157,7 +123,7 @@ def main(args):
     os.environ.pop("RAY_ADDRESS", None)
     os.environ.pop("RAY_HEAD_IP", None)
     os.environ.pop("RAY_GCS_SERVER_ADDRESS", None)
-    ray.init(address="local", include_dashboard=False, ignore_reinit_error=True, log_to_driver=False)
+    ray.init(address="local", include_dashboard=False, ignore_reinit_error=True)
 
     # Logging
     logging_dir = f"{args.experiment_dir}/countdown_nccl_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -184,10 +150,10 @@ def main(args):
         torch.cuda.empty_cache()
 
     # Load data
-    data_path = os.path.join(os.path.dirname(__file__), 'data/countdown.json')
+    data_path = "countdown/data/countdown.json"
     with open(data_path, "r") as f:
         task_datas = json.load(f)
-    task_datas = task_datas[:args.data_sample]
+    task_datas = task_datas[:200]
 
     # Launch engines
     engines, pgs = launch_engines(args.num_engines, base_model_path)
@@ -222,9 +188,6 @@ def main(args):
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
 
-    # Record total training start time
-    training_start_time = time.time()
-    
     # Engines start with identical weights (loaded from the same HF checkpoint)
     # For each iteration:
     # - Explore: per-seed add noise -> eval -> subtract noise (GPU-only)
@@ -251,7 +214,7 @@ def main(args):
                 break
             # Add exploration noise
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas, max_tokens=args.max_tokens)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": eng_idx,
@@ -284,7 +247,7 @@ def main(args):
                 continue
 
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(next_seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas, max_tokens=args.max_tokens)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": meta["engine_idx"],
@@ -301,6 +264,7 @@ def main(args):
         min_reward = float(np.min(all_avg_rewards)) if all_avg_rewards else 0.0
         max_reward = float(np.max(all_avg_rewards)) if all_avg_rewards else 0.0
 
+        print(f"Mean reward: {mean_reward}, std: {std_reward}, min: {min_reward}, max: {max_reward}")
         for k in seeds_perf:
             seeds_perf[k]["norm_reward"] = (seeds_perf[k]["avg_reward"] - mean_reward) / (std_reward + 1e-8)
             if args.verbose:
@@ -339,31 +303,19 @@ def main(args):
             for res_idx, res in enumerate(results_this_gen):
                 print(f"IDX:{res_idx} Seed {res['seed']} avg_reward: {res['avg_reward']}, time: {res['time']}s")
         total_iter_end = time.time()
-        iter_time = total_iter_end - total_iter_start
-        writer.add_scalar("time/iteration", iter_time, i)
-        
-        # Print iteration summary to stdout
-        print(f"Iteration {i + 1}/{args.num_iterations}, Time: {iter_time:.2f}s, Mean: {mean_reward:.2f}, Min: {min_reward:.2f}, Max: {max_reward:.2f}")
-        if torch.cuda.is_available():
-            print(f"GPU Memory: {torch.cuda.memory_allocated() / 1024**2:.2f}MB allocated, {torch.cuda.max_memory_allocated() / 1024**2:.2f}MB peak")
+        writer.add_scalar("time/iteration", total_iter_end - total_iter_start, i)
+        print(f"wall clock time for iteration {i}: {total_iter_end - total_iter_start}s")
         print(f"=== Generation {i} finished ===\n")
-        
-        # Save checkpoint every save_steps iterations
-        if (i + 1) % args.save_steps == 0:
-            save_model_checkpoint(
-                engines[0], tokenizer, i + 1, args.model_name, args.global_seed, 
-                args.data_sample, args, is_final=False
-            )
 
-    total_time = time.time() - training_start_time
-    
     # Save final model weights (all engines are in sync; save from engine 0)
-    print(f"\nTraining completed in {total_time:.2f}s ({total_time/60:.2f} minutes)")
-    print(f"Saving final model...")
-    save_model_checkpoint(
-        engines[0], tokenizer, args.num_iterations, args.model_name, args.global_seed,
-        args.data_sample, args, is_final=True
+    final_model_path = f"{model_saves_dir}/final_model_iteration_{args.num_iterations}"
+    os.makedirs(final_model_path, exist_ok=True)
+    ray.get(
+        engines[0].collective_rpc.remote(
+            "save_self_weights_to_disk", args=(f"{final_model_path}/pytorch_model.pth",)
+        )
     )
+    print(f"Final model weights saved to {final_model_path}.")
 
     cleanup()
 
