@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument("--experiment_dir", type=str, default=EXPERIMENT_DIR)
     parser.add_argument("--cuda_devices", type=str, default="0,1,2,3")
     parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
+    parser.add_argument('--max_new_tokens', type=int, default=1024, help='Maximum number of tokens allowed to be generated')
     parser.add_argument(
         "--global_seed",
         type=int,
@@ -95,12 +96,12 @@ def launch_engines(num_engines, model_name):
     ]
     return engines, pgs
 
-def evaluate_countdown_handle(llm, task_datas):
+def evaluate_countdown_handle(llm, task_datas, max_tokens):
     prompts = [d["context"] for d in task_datas]
     sampling_params = SamplingParams(
-        temperature=0.0,
+        temperature=0.0, # greedy
         seed=42,
-        max_tokens=1024,
+        max_tokens=max_tokens,
     )
     handle = llm.generate.remote(prompts, sampling_params, use_tqdm=False)
     return handle, time.time()
@@ -116,6 +117,61 @@ def _postprocess_outputs(outputs, task_datas):
     return {
         "rewards": rewards,
         "avg_reward": float(np.mean(avg_rewards)) if avg_rewards else 0.0,
+    }
+
+def run_final_evaluation(llm, eval_task_datas, max_tokens):
+    """Run final evaluation on eval set and return detailed metrics."""
+    print(f"\nRunning final evaluation on {len(eval_task_datas)} samples...")
+    
+    # Run inference
+    prompts = [d["context"] for d in eval_task_datas]
+    sampling_params = SamplingParams(
+        temperature=0.0,  # greedy decoding
+        seed=42,
+        max_tokens=max_tokens,
+    )
+    outputs = ray.get(llm.generate.remote(prompts, sampling_params, use_tqdm=True))
+    
+    # Process outputs and collect detailed metrics
+    format_rewards = []
+    answer_rewards = []
+    combined_rewards = []
+    per_sample_results = []
+    
+    for output, data in zip(outputs, eval_task_datas):
+        response = output.outputs[0].text
+        r = reward_function(response, data["numbers"], data["target"])
+        
+        format_reward = r["reward_info"]["format_reward"]
+        answer_reward = r["reward_info"]["answer_reward"]
+        combined_reward = r["reward"]
+        
+        format_rewards.append(format_reward)
+        answer_rewards.append(answer_reward)
+        combined_rewards.append(combined_reward)
+        
+        per_sample_results.append({
+            "format_reward": float(format_reward),
+            "answer_reward": float(answer_reward),
+            "combined_reward": float(combined_reward),
+        })
+    
+    # Calculate accuracies
+    total_samples = len(eval_task_datas)
+    format_correct = sum(1 for r in format_rewards if r == 1.0)
+    answer_correct = sum(1 for r in answer_rewards if r == 1.0)
+    format_accuracy = (format_correct / total_samples) * 100
+    answer_accuracy = (answer_correct / total_samples) * 100
+    mean_combined_reward = float(np.mean(combined_rewards))
+    
+    return {
+        "format_accuracy": format_accuracy,
+        "answer_accuracy": answer_accuracy,
+        "mean_combined_reward": mean_combined_reward,
+        "total_samples": total_samples,
+        "format_correct": format_correct,
+        "answer_correct": answer_correct,
+        "per_sample_results": per_sample_results,
     }
 
 def main(args):
@@ -152,8 +208,9 @@ def main(args):
     # Load data
     data_path = "countdown/data/countdown.json"
     with open(data_path, "r") as f:
-        task_datas = json.load(f)
-    task_datas = task_datas[:200]
+        all_task_datas = json.load(f)
+    task_datas = all_task_datas[:200]  # Training data
+    eval_task_datas = all_task_datas[200:]  # Evaluation data (last 2000 samples)
 
     # Launch engines
     engines, pgs = launch_engines(args.num_engines, base_model_path)
@@ -214,7 +271,7 @@ def main(args):
                 break
             # Add exploration noise
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas, args.max_new_tokens)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": eng_idx,
@@ -247,7 +304,7 @@ def main(args):
                 continue
 
             ray.get(llm.collective_rpc.remote("perturb_self_weights", args=(next_seed, args.sigma, False)))
-            handle, start_ts = evaluate_countdown_handle(llm, task_datas)
+            handle, start_ts = evaluate_countdown_handle(llm, task_datas, args.max_new_tokens)
             inflight[handle] = {
                 "engine": llm,
                 "engine_idx": meta["engine_idx"],
@@ -306,6 +363,45 @@ def main(args):
         writer.add_scalar("time/iteration", total_iter_end - total_iter_start, i)
         print(f"wall clock time for iteration {i}: {total_iter_end - total_iter_start}s")
         print(f"=== Generation {i} finished ===\n")
+
+    # Run final evaluation before saving checkpoint
+    print("\n" + "="*80)
+    print("FINAL EVALUATION")
+    print("="*80)
+    
+    eval_results = run_final_evaluation(engines[0], eval_task_datas, args.max_new_tokens)
+    
+    # Print results to stdout
+    print(f"\nFormat Accuracy: {eval_results['format_correct']}/{eval_results['total_samples']} = {eval_results['format_accuracy']:.2f}%")
+    print(f"Answer Accuracy: {eval_results['answer_correct']}/{eval_results['total_samples']} = {eval_results['answer_accuracy']:.2f}%")
+    print(f"Mean Combined Reward: {eval_results['mean_combined_reward']:.4f}")
+    print("="*80 + "\n")
+    
+    # Save evaluation results to JSON
+    logs_dir = f"{logging_dir}/logs"
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    eval_output = {
+        "metadata": {
+            "model_name": args.model_name,
+            "num_iterations": args.num_iterations,
+            "timestamp": datetime.now().strftime('%Y%m%d_%H%M%S'),
+        },
+        "metrics": {
+            "format_accuracy": eval_results["format_accuracy"],
+            "answer_accuracy": eval_results["answer_accuracy"],
+            "mean_combined_reward": eval_results["mean_combined_reward"],
+            "total_samples": eval_results["total_samples"],
+            "format_correct": eval_results["format_correct"],
+            "answer_correct": eval_results["answer_correct"],
+        },
+        "per_sample_results": eval_results["per_sample_results"],
+    }
+    
+    eval_json_path = f"{logs_dir}/final_eval_results.json"
+    with open(eval_json_path, "w") as f:
+        json.dump(eval_output, f, indent=2)
+    print(f"Evaluation results saved to {eval_json_path}\n")
 
     # Save final model weights (all engines are in sync; save from engine 0)
     final_model_path = f"{model_saves_dir}/final_model_iteration_{args.num_iterations}"

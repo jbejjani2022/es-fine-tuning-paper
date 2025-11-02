@@ -35,4 +35,5 @@ python countdown/es_fine-tuning_countdown_accl.py \
   --sigma 0.001 \
   --alpha 0.0005 \
   --global_seed $SLURM_ARRAY_TASK_ID \
+  --max_new_tokens 1024 \
   --experiment_dir es-ft-experiment
