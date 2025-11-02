@@ -16,8 +16,8 @@ torch.backends.cuda.matmul.allow_tf32 = True
 parser = argparse.ArgumentParser(description='Evaluate fine-tuned model using conciseness reward only')
 parser.add_argument('--model', type=str, required=True,
                     help='Name of HuggingFace model or path to a saved model checkpoint')
-parser.add_argument('--baseline_model_name', type=str, default='Qwen/Qwen2.5-3B-Instruct',
-                    help='Optional baseline model name (not used, kept for CLI compatibility)')
+parser.add_argument('--baseline_model_name', type=str, required=True,
+                    help='Baseline model name for KL calculation')
 parser.add_argument('--hf_cache_dir', type=str, default='hf_cache',
                     help='HuggingFace cache directory')
 parser.add_argument('--precision', type=str, default='bf16', choices=['fp16', 'bf16', 'fp32'],
