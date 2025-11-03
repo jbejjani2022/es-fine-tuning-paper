@@ -1,0 +1,57 @@
+{
+  "bucket_counts": {
+    "(True, True)": 200,
+    "(False, False)": 232,
+    "(False, True)": 38,
+    "(True, False)": 30
+  },
+  "bucket_proportions": {
+    "(True, True)": 0.4,
+    "(False, False)": 0.464,
+    "(False, True)": 0.076,
+    "(True, False)": 0.06
+  },
+  "harm_counts_per_response": {
+    "Privacy Violation": 114,
+    "Cybercrime": 156,
+    "Endangering National Security": 58,
+    "Economic Crime": 126,
+    "Insulting Behavior": 61,
+    "Discriminatory Behavior": 38,
+    "Psychological Harm": 53,
+    "Violence": 79,
+    "Disrupting Public Order": 41,
+    "Animal Abuse": 8,
+    "Physical Harm": 82,
+    "White-Collar Crime": 50,
+    "Mental Manipulation": 74,
+    "Sexual Content": 17,
+    "Copyright Issues": 10,
+    "Drugs": 55,
+    "Endangering Public Health": 13,
+    "Human Trafficking": 30,
+    "Environmental Damage": 11
+  },
+  "harm_counts_per_pair": {
+    "Cybercrime": 96,
+    "Privacy Violation": 74,
+    "Economic Crime": 72,
+    "Endangering National Security": 33,
+    "Discriminatory Behavior": 24,
+    "Insulting Behavior": 41,
+    "Psychological Harm": 40,
+    "Disrupting Public Order": 28,
+    "Physical Harm": 58,
+    "Animal Abuse": 5,
+    "Violence": 47,
+    "White-Collar Crime": 33,
+    "Sexual Content": 10,
+    "Mental Manipulation": 45,
+    "Copyright Issues": 7,
+    "Drugs": 34,
+    "Endangering Public Health": 9,
+    "Human Trafficking": 17,
+    "Environmental Damage": 8
+  },
+  "num_rows": 500
+}
