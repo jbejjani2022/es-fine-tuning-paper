@@ -103,38 +103,37 @@ def parse_args():
 
 class ESNcclLLM(LLM):
     def __init__(self, *args, **kwargs):
-        # Let Ray/PG determine the actual visible device in the actor
-        os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        # Preserve Ray-assigned CUDA_VISIBLE_DEVICES for correct GPU isolation
         os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
         super().__init__(*args, **kwargs)
 
 def launch_engines(num_engines, model_name):
     # Strict 1-GPU isolation via PGs (exactly like countdown)
-    pgs = [placement_group([{"GPU": 1, "CPU": 0}], lifetime="detached") for _ in range(num_engines)]
-    ray.get([pg.ready() for pg in pgs])
+    # pgs = [placement_group([{"GPU": 1, "CPU": 8}], strategy="STRICT_PACK", lifetime="detached") for _ in range(num_engines)]
+    # ray.get([pg.ready() for pg in pgs])
 
-    strategies = [
-        PlacementGroupSchedulingStrategy(
-            placement_group=pg,
-            placement_group_capture_child_tasks=True,
-            placement_group_bundle_index=0,
-        )
-        for pg in pgs
-    ]
+    # strategies = [
+    #     PlacementGroupSchedulingStrategy(
+    #         placement_group=pg,
+    #         placement_group_capture_child_tasks=True,
+    #         placement_group_bundle_index=0,
+    #     )
+    #     for pg in pgs
+    # ]
 
     engines = [
-        ray.remote(num_cpus=0, num_gpus=0, scheduling_strategy=strategy)(ESNcclLLM).remote(
+        ray.remote(num_cpus=8, num_gpus=1)(ESNcclLLM).remote(
             model=model_name,
             tensor_parallel_size=1,
-            distributed_executor_backend="ray",
+            distributed_executor_backend="mp",
             worker_extension_cls="utils.worker_extn.WorkerExtension",
             dtype="float16",
             enable_prefix_caching=False,
             enforce_eager=False,
         )
-        for strategy in strategies
+        for _ in range(num_engines)
     ]
-    return engines, pgs
+    return engines, []
 
 def call_scorer_api(scorer_url, texts, batch_size=16):
     """Call the external scorer API to get rewards and costs."""
@@ -432,7 +431,7 @@ def main(args):
 
     # Launch engines (exactly like countdown)
     print(f"\nLaunching {args.num_engines} vLLM engines with placement groups...")
-    engines, pgs = launch_engines(args.num_engines, base_model_path)
+    engines, _ = launch_engines(args.num_engines, base_model_path)
     print(f"✅ Submitted {len(engines)} engines")
 
     # Initialize lambda for Lagrangian adaptation
@@ -454,11 +453,11 @@ def main(args):
                 ray.kill(llm)
             except Exception:
                 pass
-        for pg in pgs:
-            try:
-                remove_placement_group(pg)
-            except Exception:
-                pass
+        # for pg in pgs:
+        #     try:
+        #         remove_placement_group(pg)
+        #     except Exception:
+        #         pass
         ray.shutdown()
 
     def sig_handler(sig, frame):
