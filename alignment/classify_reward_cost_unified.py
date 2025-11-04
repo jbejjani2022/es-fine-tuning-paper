@@ -9,6 +9,7 @@ import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer as HFAutoTokenizer
 import matplotlib.pyplot as plt  # optional plotting
+from tqdm import tqdm
 
 # Ensure local safe-rlhf package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'safe-rlhf'))
@@ -58,20 +59,20 @@ def main():
     records = []
     if args.from_jsonl and os.path.exists(args.from_jsonl):
         with open(args.from_jsonl, 'r') as f:
-            for line in f:
+            for line in tqdm(f, desc='Loading JSONL', unit='lines'):
                 records.append(json.loads(line))
     else:
         ds = load_dataset(args.dataset_name, "alpaca-7b", split=args.split)
         rng = np.random.default_rng(args.seed)
         idxs = rng.choice(len(ds), size=min(args.num_samples, len(ds)), replace=False)
-        for i in idxs:
+        for i in tqdm(idxs, desc='Sampling dataset', unit='ex'):
             records.append(ds[int(i)])
 
     # score both responses per example
     Rs, Cs = [], []
     labels = []  # SH/SU/UH/UU
     points = []
-    for ex in records:
+    for ex in tqdm(records, desc='Scoring', unit='ex'):
         prompt = ex['prompt']
         responses: List[str]
         if policy_model is not None:
