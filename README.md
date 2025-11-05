@@ -5,11 +5,12 @@ This is our CS2881 mini-project fork of the authors’ repository “Evolution S
 - Original repository (authors): https://github.com/VsonicV/es-fine-tuning-paper
 - This fork (our project): https://github.com/jbejjani2022/es-fine-tuning-paper
 
-## What’s in this fork
+## What's in this fork
 
 - Reproduction of Tables 1 and 2 from the paper (Countdown accuracy; Conciseness reward and KL)
 - Evaluation scripts for both tasks (authors did not release them in the original repo at the time of writing)
 - Alignment experiments (helpful–harmless) using Safe-RLHF unified reward/cost models, with an external scorer service to avoid GPU contention with vLLM
+- Perturbation robustness study comparing ES vs. GRPO checkpoints under Gaussian parameter noise
 - SLURM job scripts for training and evaluation on H100 nodes
 
 ## Repository structure (high level)
@@ -34,12 +35,17 @@ This is our CS2881 mini-project fork of the authors’ repository “Evolution S
   - countdown_eval.py (evaluation utility)
   - data/countdown.json (dataset)
 
+- perturb/: Robustness evaluation of ES vs. GRPO checkpoints under noisy perturbations
+  - sweep.py (main script: perturbs model parameters and evaluates degradation)
+  - summarize.py (analyzes results from perturbation experiments)
+
 - GRPO/: Configuration and training scripts for GRPO baselines
   - train_grpo_conciseness_trl.py; countdown/ configs; accelerate configs
 
 - slurm/: SLURM job scripts for training/eval
   - train_conciseness.sh, conciseness_es_eval.sh, conciseness_grpo_eval.sh
-  - train_countdown.sh, countdown_eval.sh, countdown_accl_eval.sh
+  - train_countdown.sh, countdown_eval.sh
+  - perturbation_robustness_eval.sh (robustness evaluation)
   - run_scorer_service.sh, train_accl_alignment_api.sh (alignment)
 
 - utils/worker_extn.py: small vLLM worker extension used by accelerated/alignment paths
@@ -62,15 +68,17 @@ Notes:
 - Conciseness (ES): see slurm/train_conciseness.sh and slurm/conciseness_es_eval.sh
 - Conciseness (GRPO): see slurm/conciseness_grpo_eval.sh and GRPO configs
 - Countdown (ES): see slurm/train_countdown.sh and slurm/countdown_eval.sh
-- Countdown (accelerated): see slurm/train_accl_countdown.sh and slurm/countdown_accl_eval.sh
+- Countdown (ES accelerated): see slurm/train_accl_countdown.sh
 - Alignment (ES with external scorer): see alignment/README.md
+- Perturbation robustness: see slurm/perturbation_robustness_eval.sh
 
 ## Project context
 
-Motivated by the authors’ claim that ES can match or exceed RL methods like GRPO in sample efficiency, long-horizon robustness, and reduced reward hacking, we:
+Motivated by the authors' claim that ES can match or exceed RL methods like GRPO in sample efficiency, long-horizon robustness, and reduced reward hacking, we:
 - Reproduce the main results (Countdown accuracy; Conciseness reward/KL)
 - Add alignment experiments using Safe-RLHF unified models (reward/cost)
 - Compare ES and RL behavior qualitatively and under perturbations
+- Evaluate robustness by measuring reward degradation and KL divergence when model parameters are perturbed with Gaussian noise at different scales
 
 ## Citation
 
