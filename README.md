@@ -1,99 +1,80 @@
-# es-fine-tuning-paper
-This repo contains the source code for the paper "Evolution Strategies at Scale: LLM Fine-Tuning Beyond Reinforcement Learning" (https://arxiv.org/abs/2509.24372). Evolution strategies (ES) is used to directly optimize billions of parameters of large language models (LLMs).
+# CS2881 Mini-Project: ES Fine-Tuning Beyond RL (Fork)
 
-Feel free to join the ES fine-tuning forum in [Discussions](https://github.com/VsonicV/es-fine-tuning-paper/discussions).
+This is our CS2881 mini-project fork of the authors’ repository “Evolution Strategies at Scale: LLM Fine-Tuning Beyond Reinforcement Learning.” We replicate headline results on Countdown and Conciseness and extend the work with alignment experiments using Safe-RLHF unified reward/cost models and a lightweight scorer API.
 
-### News
-10/27/2025: :fire::fire::fire: An accelerated version with **10X+ speed-up** in running time is added to the repo!  See [here](https://github.com/VsonicV/es-fine-tuning-paper?tab=readme-ov-file#accelerated-version-10x-speed-up). :rocket::rocket::rocket:
+- Original repository (authors): https://github.com/VsonicV/es-fine-tuning-paper
+- This fork (our project): https://github.com/jbejjani2022/es-fine-tuning-paper
 
-Note: we are still actively adding more experimental codes into this repo. We expect breaking change to the accelerated implementations.
+## What’s in this fork
 
-## Setup
-Create a virtual environment with python version >= 3.10 and activate it
+- Reproduction of Tables 1 and 2 from the paper (Countdown accuracy; Conciseness reward and KL)
+- Evaluation scripts for both tasks (authors did not release them in the original repo at the time of writing)
+- Alignment experiments (helpful–harmless) using Safe-RLHF unified reward/cost models, with an external scorer service to avoid GPU contention with vLLM
+- SLURM job scripts for training and evaluation on H100 nodes
+
+## Repository structure (high level)
+
+- alignment/: ES for alignment (helpful–harmless)
+  - safe-rlhf/ (local clone required by scorer scripts)
+  - scorer_service.py (FastAPI scorer using unified models)
+  - es-fine-tuning_alignment_accl_api.py (ES training with external scorer API)
+  - classify_reward_cost_unified.py (classify PKU responses by reward/cost; saves arrays/plots)
+  - alpaca/ (scripts to recover Alpaca‑7B from LLaMA‑7B + diff)
+  - select_pku_balanced.ipynb (creates custom train/eval selections)
+  - See alignment/README.md for details and step-by-step instructions
+
+- conciseness/: ES/GRPO scripts and evaluation for the Conciseness task
+  - es_fine-tuning_conciseness_iid.py (recommended i.i.d. noise version)
+  - conciseness_eval.py, conciseness_eval_reward_only.py (evaluation utilities)
+  - data/ (JSONL train/eval examples)
+
+- countdown/: ES scripts and evaluation for the Countdown task
+  - es_fine-tuning_countdown_iid.py (recommended i.i.d. noise version)
+  - es_fine-tuning_countdown_accl.py (accelerated vLLM version)
+  - countdown_eval.py (evaluation utility)
+  - data/countdown.json (dataset)
+
+- GRPO/: Configuration and training scripts for GRPO baselines
+  - train_grpo_conciseness_trl.py; countdown/ configs; accelerate configs
+
+- slurm/: SLURM job scripts for training/eval
+  - train_conciseness.sh, conciseness_es_eval.sh, conciseness_grpo_eval.sh
+  - train_countdown.sh, countdown_eval.sh, countdown_accl_eval.sh
+  - run_scorer_service.sh, train_accl_alignment_api.sh (alignment)
+
+- utils/worker_extn.py: small vLLM worker extension used by accelerated/alignment paths
+
+## Quick setup
+
+Create and activate a Python 3.10+ virtual environment, then install requirements:
 ```bash
 python -m venv es
 source es/bin/activate
-```
-
-From the root of the repository run following command to install all the relevant python packages
-```bash
 pip install -r requirement.txt
 ```
 
+Notes:
+- Accelerated/vLLM paths require vLLM==0.11.0 (already pinned in requirement.txt)
+- For alignment, clone Safe-RLHF locally into alignment/: `git clone https://github.com/PKU-Alignment/safe-rlhf.git alignment/safe-rlhf`
 
-## Usage
-For running the main ES code on conciseness fine-tuning
+## Reproducing results (brief pointers)
 
-```bash
-accelerate launch \
-    --num_processes 2 \
-    --num_machines 1 \
-    --machine_rank 0 \
-    es_fine-tuning_conciseness.py \
-    --gpu_threads=1 \
-    --model_name=Qwen/Qwen2.5-7B-Instruct
-```
+- Conciseness (ES): see slurm/train_conciseness.sh and slurm/conciseness_es_eval.sh
+- Conciseness (GRPO): see slurm/conciseness_grpo_eval.sh and GRPO configs
+- Countdown (ES): see slurm/train_countdown.sh and slurm/countdown_eval.sh
+- Countdown (accelerated): see slurm/train_accl_countdown.sh and slurm/countdown_accl_eval.sh
+- Alignment (ES with external scorer): see alignment/README.md
 
-`--num_processes` specifies the number of GPUs to use and `--gpu_threads` specifies the number of threads inside each GPU. The total number of parallel evaluations is thereby equal to `num_processes`*`gpu_threads`.
+## Project context
 
-For running the main ES code on the Countdown task
-```bash
-accelerate launch \
-    --num_processes 4 \
-    --num_machines 1\
-    --machine_rank 0 \
-    countdown/es_fine-tuning_countdown.py \
-    --data_sample 200 \
-    --model_name Qwen/Qwen2.5-3B-Instruct \
-    --gpu_threads 1
-```
-
-
-### Other Parameters
-
-- `--gpu_ids`: Specify which GPUs to use (CUDA device id), argument for `accelerate launch`
-- `--model_name`: HuggingFace model to fine-tune
-- `--hf_cache_dir`: Directory for HuggingFace cache
-- `--precision`: Model precision, default to be `bf16`
-- `--verbose`: Enable detailed logging if this argument is present in the command line
-
-Note: The original implementation uses a partially correlated noise. To use complete i.i.d. noise, please use `es_fine-tuning_conciseness_iid.py` and `countdown/es_fine-tuning_countdown_iid.py` instead. See [here](https://github.com/VsonicV/es-fine-tuning-paper/discussions/7) for more details.
-
-## Accelerated Version (10X+ Speed-up)
-
-If you are using the latest accelerated version `es-fine-tuning_countdown_accl.py`, please also install the `vllm` and `tensorboard` by:
-```bash
-pip install vllm==0.11.0
-pip install tensorboard
-```
-
-For running the accelerated version on the Countdown task:
-```bash
-# Single-GPU quickstart
-python es_fine-tuning_countdown_accl.py \
-  --model_name Qwen/Qwen2.5-3B-Instruct \
-  --cuda_devices 0 \
-  --num_engines 1 \
-  --population_size 30 \
-  --num_iterations 1000
-
-# Multi-GPU run (one vLLM engine per GPU)
-python es_fine-tuning_countdown_accl.py \
-  --model_name Qwen/Qwen2.5-3B-Instruct \
-  --cuda_devices 0,1,2,3 \
-  --num_engines 4 \
-  --population_size 30 \
-  --num_iterations 1000 \
-  --sigma 0.001 \
-  --alpha 0.0005 \
-  --experiment_dir es-ft-experiment
-```
-
-On preliminary 4xH100 setting, accelerated version achieves ~10 times speed-up with similar convergence rate.
+Motivated by the authors’ claim that ES can match or exceed RL methods like GRPO in sample efficiency, long-horizon robustness, and reduced reward hacking, we:
+- Reproduce the main results (Countdown accuracy; Conciseness reward/KL)
+- Add alignment experiments using Safe-RLHF unified models (reward/cost)
+- Compare ES and RL behavior qualitatively and under perturbations
 
 ## Citation
 
-If you find this work helpful in your research, please cite:
+If you reference the upstream paper, please cite:
 
 ```bibtex
 @misc{qiu2025evolutionstrategiesscalellm,
