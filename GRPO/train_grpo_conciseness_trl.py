@@ -1,15 +1,6 @@
 #!/usr/bin/env python
 import os, sys, json, random, argparse
 
-os.environ['TRANSFORMERS_CACHE'] = '/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface'
-os.environ['HF_DATASETS_CACHE'] = '/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface'
-os.environ['HF_HOME'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface"
-os.environ['HF_HUB_CACHE'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface/hub"
-os.environ['HF_ASSETS_CACHE'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface/assets"
-os.environ['HF_TOKEN_PATH'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/huggingface/token"
-os.environ['XET_CACHE_DIR'] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/xet"
-os.environ["VLLM_CACHE_ROOT"] = "/n/netscratch/kempner_sham_lab/Lab/itamarf/.cache/vllm_cache"
-
 def load_yaml(path: str) -> dict:
     text = open(path, "r").read()
     try:
@@ -31,7 +22,6 @@ def read_jsonl_rows(path: str):
 def format_train_eval_datasets(cfg: dict, tokenizer=None):
     """
     Return (train_dataset, eval_dataset_or_None) with prompts formatted for TRL GRPO.
-    TRL expects string prompts, so we apply chat template to get formatted strings.
     """
     from datasets import Dataset
     pkey = cfg.get("prompt_key", "prompt")
@@ -112,6 +102,7 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name"], use_fast=False)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
 
     # GRPO args
     use_vllm = bool(int(os.environ.get("USE_VLLM", "0")))

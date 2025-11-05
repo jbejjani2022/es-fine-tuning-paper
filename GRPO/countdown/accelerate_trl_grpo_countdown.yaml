@@ -1,0 +1,6 @@
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+num_machines: 1
+machine_rank: 0
+gpu_ids: all
+use_cpu: false

@@ -69,3 +69,39 @@ class WorkerExtension:
             torch.cuda.empty_cache()
         time.sleep(0.1)
         return True
+
+    def load_self_weights_from_disk(self, filepath, strict: bool = False):
+        """
+        Load a fused vLLM state_dict that was previously saved by save_self_weights_to_disk.
+        - Assumes keys match the engine's fused param names (qkv_proj, gate_up_proj, etc.)
+        - Moves tensors to the current device and model dtype.
+        """
+        import os
+        assert os.path.exists(filepath), f"Checkpoint not found: {filepath}"
+
+        # Load to CPU first to avoid GPU spikes, then move to model device/dtype
+        sd = torch.load(filepath, map_location="cpu")
+
+        # Ensure dtype/device match the live model
+        model = self.model_runner.model
+        target_device = next(model.parameters()).device
+        target_dtype  = next(model.parameters()).dtype
+
+        for k, v in sd.items():
+            if isinstance(v, torch.Tensor):
+                # Move without extra copies where possible
+                v = v.to(device=target_device, dtype=target_dtype, non_blocking=True)
+                sd[k] = v
+
+        # Load (strict=False by default to tolerate minor head/vocab diffs)
+        missing, unexpected = model.load_state_dict(sd, strict=strict)
+
+        # Cleanup
+        del sd
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        gc.collect()
+
+        # Return something small so ray.get(...) completes
+        return {"missing": list(missing)[:5], "unexpected": list(unexpected)[:5]}
