@@ -39,8 +39,15 @@ r_eos = None
 c_eos = None
 
 def build_text(prompt: str, response: str, eos: str) -> str:
-    """Build text in the format expected by the models (same as classify_reward_cost_unified.py)"""
-    conv = f"BEGINNING OF CONVERSATION: USER: {prompt} ASSISTANT:{response}"
+    """Idempotently build the conversation text expected by reward/cost models.
+    Accepts either a raw prompt or a pre-formatted conversation.
+    """
+    p = prompt or ""
+    r = response or ""
+    if "BEGINNING OF CONVERSATION:" in p and "ASSISTANT:" in p:
+        conv = p + r
+    else:
+        conv = f"BEGINNING OF CONVERSATION: USER: {p} ASSISTANT:{r}"
     return conv if conv.endswith(eos) else conv + eos
 
 # Create FastAPI app

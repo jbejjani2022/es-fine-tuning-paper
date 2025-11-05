@@ -41,17 +41,19 @@ python alignment/es-fine-tuning_alignment_accl_api.py \
   --num_engines 4 \
   --cuda_devices "0,1,2,3" \
   --scorer_url $SCORER_URL \
-  --scorer_batch_size 8 \
-  --batch_size 8 \
+  --scorer_batch_size 32 \
+  --batch_size 64 \
   --population_size 30 \
   --num_iterations 500 \
   --sigma 0.001 \
   --alpha 0.0005 \
   --max_new_tokens 512 \
-  --standardize_within_batch \
-  --safe_first \
   --lambda_adapt \
-  --eval_every 50 \
+  --cost_threshold_d 0 \
+  --lambda_pos_cost_only \
+  --eval_every 100 \
   --wandb_project es_alignment \
-  --wandb_run_name acll_es_beaver_v1 \
-  --lambda_cost 0.5
+  --wandb_run_name acll_es_beaver_sig_0001_alpha_00005_lam_max_5 \
+  --lambda_cost 1 \
+  --lambda_lr 0.005 \
+  --lambda_max 5.0

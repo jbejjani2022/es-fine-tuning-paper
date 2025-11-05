@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument('--train_jsonl', type=str, default='alignment/data/custom_train_250.jsonl')
     parser.add_argument('--eval_jsonl', type=str, default='alignment/data/custom_eval_500.jsonl')
     parser.add_argument('--batch_size', type=int, default=200, help='Number of prompts to sample per iteration for ES fitness')
-    parser.add_argument('--standardize_within_batch', action='store_true', default=True,
+    parser.add_argument('--standardize_within_batch', action='store_true', default=False,
                         help='Standardize reward and cost within mini-batch before combining')
     parser.add_argument('--safe_first', action='store_true', default=False,
                         help='Apply safe-first gating: zero or downweight reward when cost>0')
@@ -78,8 +78,12 @@ def parse_args():
     parser.add_argument('--lambda_lr', type=float, default=0.01, help='Learning rate for ln(lambda) update')
     parser.add_argument('--lambda_min', type=float, default=1e-4)
     parser.add_argument('--lambda_max', type=float, default=10.0)
-    parser.add_argument('--lambda_pos_cost_only', action='store_true', default=True,
+    parser.add_argument('--lambda_pos_cost_only', action='store_true', default=False,
                         help='Use mean(max(C,0)) as J_C for lambda update')
+    parser.add_argument('--jc_ema_beta', type=float, default=0.9,
+                    help='EMA smoothing factor for J_C used in lambda update.')
+    parser.add_argument('--cost_threshold_d', type=float, default=0.0,
+                    help='Safety threshold d in J_C = E[C] + d (Safe-RLHF constraint).')
     parser.add_argument('--eval_every', type=int, default=50)
     parser.add_argument('--wandb_project', type=str, default='alignment_accl')
     parser.add_argument('--wandb_run_name', type=str, default='')
@@ -136,53 +140,40 @@ def launch_engines(num_engines, model_name):
     return engines, []
 
 def call_scorer_api(scorer_url, texts, batch_size=16):
-    """Call the external scorer API to get rewards and costs."""
+    """Call the external scorer API to get rewards and costs.
+    texts are of the form:
+      "BEGINNING OF CONVERSATION: USER: {user} ASSISTANT:{response}"
+    We extract raw user and response to avoid double-prefixing on the server.
+    """
     try:
-        # For alignment task, texts are already full (prompt + response)
-        # We need to extract prompts and responses for the API
-        # The format is: BEGINNING OF CONVERSATION: USER: {prompt} ASSISTANT:{response}
-        prompts = []
-        responses = []
+        prompts, responses = [], []
         for text in texts:
-            # Split on ASSISTANT: to separate prompt and response
-            parts = text.split('ASSISTANT:')
-            if len(parts) >= 2:
-                # Everything before ASSISTANT: is the prompt part
-                prompt = parts[0] + 'ASSISTANT:'
-                # Everything after is the response
-                response = ''.join(parts[1:])
-                prompts.append(prompt)
-                responses.append(response)
+            # Robustly extract between USER: and ASSISTANT:
+            if 'USER:' in text and 'ASSISTANT:' in text:
+                user_part = text.split('USER:', 1)[1]
+                user = user_part.rsplit('ASSISTANT:', 1)[0].strip()
+                resp = text.split('ASSISTANT:', 1)[1]
+                prompts.append(user)
+                responses.append(resp)
             else:
-                # Fallback if format is unexpected
+                # Fallback: treat whole text as prompt, empty response
                 prompts.append(text)
                 responses.append("")
-        
-        # Call the API in batches if needed
-        all_rewards = []
-        all_costs = []
-        
+
+        all_rewards, all_costs = [], []
+
         for i in range(0, len(prompts), batch_size):
-            batch_prompts = prompts[i:i+batch_size]
-            batch_responses = responses[i:i+batch_size]
-            
             payload = {
-                "prompts": batch_prompts,
-                "responses": batch_responses
+                "prompts": prompts[i:i+batch_size],
+                "responses": responses[i:i+batch_size],
             }
-            
-            # Use the batch endpoint for efficiency
-            response = requests.post(
-                f"{scorer_url}/score_batch",
-                json=payload,
-                timeout=60
-            )
-            response.raise_for_status()
-            
-            result = response.json()
+            t0 = time.time()
+            r = requests.post(f"{scorer_url}/score_batch", json=payload, timeout=60)
+            r.raise_for_status()
+            result = r.json()
             all_rewards.extend(result["rewards"])
             all_costs.extend(result["costs"])
-        
+
         return {
             "per_sample_reward": all_rewards,
             "per_sample_cost": all_costs,
@@ -190,11 +181,10 @@ def call_scorer_api(scorer_url, texts, batch_size=16):
             "mean_cost": float(np.mean(all_costs)) if all_costs else 0.0,
             "safe_count": sum(1 for c in all_costs if c <= 0),
             "num_samples": len(all_costs),
-            "safe_ratio": sum(1 for c in all_costs if c <= 0) / len(all_costs) if all_costs else 0.0,
+            "safe_ratio": (sum(1 for c in all_costs if c <= 0) / len(all_costs)) if all_costs else 0.0,
         }
     except requests.exceptions.RequestException as e:
         print(f"Error calling scorer API: {e}")
-        # Return zeros if the API call fails
         return {
             "per_sample_reward": [0.0] * len(texts),
             "per_sample_cost": [0.0] * len(texts),
@@ -221,7 +211,7 @@ def build_full_texts(prompts, outputs):
         full_texts.append(p + response)
     return full_texts
 
-def run_final_evaluation(llm, eval_prompts, scorer_url, args):
+def run_final_evaluation(llm, eval_prompts, scorer_url, args, lambda_for_eval=None):
     print(f"\nRunning final evaluation on {len(eval_prompts)} samples...")
 
     sampling_params = SamplingParams(
@@ -237,20 +227,22 @@ def run_final_evaluation(llm, eval_prompts, scorer_url, args):
     rewards = np.asarray(eval_scores["per_sample_reward"], dtype=np.float32)
     costs = np.asarray(eval_scores["per_sample_cost"], dtype=np.float32)
 
-    # Safe-first and optional standardization (to mirror training combine)
+
+    lam = float(args.lambda_cost if lambda_for_eval is None else lambda_for_eval)
+
     if args.safe_first:
         r_eff = np.where(costs > 0.0, args.safe_first_factor * rewards, rewards)
     else:
         r_eff = rewards
+
+    # optional SCALE only
     if args.standardize_within_batch:
-        r_mean, r_std = float(r_eff.mean()), float(r_eff.std()) + 1e-8
-        c_mean, c_std = float(costs.mean()), float(costs.std()) + 1e-8
-        r_tilde = (r_eff - r_mean) / r_std
-        c_tilde = (costs - c_mean) / c_std
-    else:
-        r_tilde = r_eff
-        c_tilde = costs
-    combined = r_tilde - args.lambda_cost * c_tilde
+        r_std = float(r_eff.std()) + 1e-8
+        c_std = float(costs.std()) + 1e-8
+        r_eff = r_eff / r_std
+        costs  = costs / c_std
+
+    combined = r_eff - lam * costs
 
     per_sample_results = []
     for r, c, comb in zip(rewards.tolist(), costs.tolist(), combined.tolist()):
@@ -266,7 +258,22 @@ def run_final_evaluation(llm, eval_prompts, scorer_url, args):
         "mean_combined": float(combined.mean()) if combined.size > 0 else 0.0,
         "total_samples": len(full_texts),
         "per_sample_results": per_sample_results,
+        "eval_prompts": eval_prompts,          # <--- add
+        "eval_outputs": outputs,               # vLLM RequestOutput list
+        "scores_raw": eval_scores,             # dict with per-sample arrays
     }
+
+def log_artifact_dir(path, name, type_="model"):
+    if args.wandb_project and wandb is not None and os.path.exists(path):
+        art = wandb.Artifact(name=name, type=type_)
+        art.add_dir(path)
+        wandb.log_artifact(art)
+
+def log_artifact_file(path, name, type_="evaluation"):
+    if args.wandb_project and wandb is not None and os.path.exists(path):
+        art = wandb.Artifact(name=name, type=type_)
+        art.add_file(path)
+        wandb.log_artifact(art)
 
 def main(args):
     # Ensure local Ray
@@ -326,6 +333,8 @@ def main(args):
             'scorer_batch_size': args.scorer_batch_size,
             'eval_every': args.eval_every,
         })
+        wandb.define_metric("iteration")
+        wandb.define_metric("*", step_metric="iteration")
 
     # Prepare an HF checkpoint for vLLM to load
     model_saves_dir = f"{logging_dir}/model_saves"
@@ -436,6 +445,7 @@ def main(args):
 
     # Initialize lambda for Lagrangian adaptation
     current_lambda = float(args.lambda_cost)
+    jc_ema = None
 
     # Init inter-engine communicator once
     master_address = get_ip()
@@ -533,17 +543,18 @@ def main(args):
             else:
                 r_eff = rewards_np
 
-            if args.standardize_within_batch:
-                r_mean, r_std = float(r_eff.mean()), float(r_eff.std()) + 1e-8
-                c_mean, c_std = float(costs_np.mean()), float(costs_np.std()) + 1e-8
-                r_tilde = (r_eff - r_mean) / r_std
-                c_tilde = (costs_np - c_mean) / c_std
-            else:
-                r_tilde = r_eff
-                c_tilde = costs_np
+            # means over the batch
+            r_mean = float(r_eff.mean())
+            c_mean = float(costs_np.mean())
 
-            combined_arr = r_tilde - current_lambda * c_tilde
-            mean_combined = float(combined_arr.mean()) if combined_arr.size > 0 else 0.0
+            # optional SCALE (divide by std), but DO NOT center
+            if args.standardize_within_batch:
+                r_std = float(r_eff.std()) + 1e-8
+                c_std = float(costs_np.std()) + 1e-8
+                r_mean /= r_std
+                c_mean /= c_std
+
+            mean_combined = r_mean - current_lambda * c_mean
 
             seeds_perf[meta["seed"]] = {
                 **metrics,
@@ -579,13 +590,28 @@ def main(args):
             base_texts = build_full_texts(curr_prompts, base_outputs)
             base_scores = call_scorer_api(args.scorer_url, base_texts, batch_size=args.scorer_batch_size)
             base_costs = np.asarray(base_scores["per_sample_cost"], dtype=np.float32)
-            jc = float(np.mean(np.maximum(base_costs, 0.0))) if args.lambda_pos_cost_only else float(np.mean(base_costs))
+
+            # Paper: J_C(θ) = E[C] + d; update on the positive part and use a moving average
+            jc_raw = float(np.mean(base_costs) + args.cost_threshold_d)
+            jc = max(jc_raw, 0.0) if args.lambda_pos_cost_only else jc_raw
+            jc_ema = jc if jc_ema is None else (args.jc_ema_beta * jc_ema + (1.0 - args.jc_ema_beta) * jc)
+
             ln_lambda = float(np.log(max(current_lambda, 1e-12)))
-            ln_lambda += args.lambda_lr * current_lambda * jc
+            ln_lambda += args.lambda_lr * jc_ema
             current_lambda = float(np.clip(np.exp(ln_lambda), args.lambda_min, args.lambda_max))
             writer.add_scalar("lambda/J_C", jc, i)
+            writer.add_scalar("lambda/J_C_raw", jc_raw, i)
+            writer.add_scalar("lambda/J_C_ema", jc_ema, i)
             writer.add_scalar("lambda/value", current_lambda, i)
-
+            writer.add_scalar("lambda/d", args.cost_threshold_d, i)
+            if args.wandb_project and wandb is not None:
+                wandb.log({
+                    "iteration": i,
+                    "lambda/J_C": jc,
+                    "lambda/J_C_raw": jc_raw,
+                    "lambda/value": current_lambda
+                }, step=i)
+                wandb.log({"iteration": i, "lambda/d": args.cost_threshold_d}, step=i)
         # Normalize combined objective
         all_means = [v["mean_combined"] for v in seeds_perf.values()]
         mean_combined = float(np.mean(all_means)) if all_means else 0.0
@@ -607,11 +633,12 @@ def main(args):
         writer.add_scalar("cost/mean", float(np.mean([v["mean_cost"] for v in seeds_perf.values()])), i)
         if total_sampled > 0:
             writer.add_scalar("safety/safe_ratio", float(total_safe_count) / float(total_sampled), i)
-        try:
-            writer.add_histogram("helpfulness/dist", np.asarray(all_rewards_samples, dtype=np.float32), i)
-            writer.add_histogram("cost/dist", np.asarray(all_cost_samples, dtype=np.float32), i)
-        except Exception:
-            pass
+        if i % 25 == 0:
+            try:
+                writer.add_histogram("helpfulness/dist", np.asarray(all_rewards_samples, dtype=np.float32), i)
+                writer.add_histogram("cost/dist", np.asarray(all_cost_samples, dtype=np.float32), i)
+            except Exception:
+                pass
         if args.wandb_project and wandb is not None:
             log_payload = {
                 'combined/mean': mean_combined,
@@ -623,11 +650,25 @@ def main(args):
             }
             if total_sampled > 0:
                 log_payload['safety/safe_ratio'] = float(total_safe_count) / float(total_sampled)
-            try:
-                log_payload['helpfulness/dist'] = wandb.Histogram(np.asarray(all_rewards_samples, dtype=np.float32))
-                log_payload['cost/dist'] = wandb.Histogram(np.asarray(all_cost_samples, dtype=np.float32))
-            except Exception:
-                pass
+            # TODO: Replace this by a parameter
+            if (i + 1) % 50 == 0:
+                try:
+                    log_payload['helpfulness/dist'] = wandb.Histogram(np.asarray(all_rewards_samples, dtype=np.float32))
+                    log_payload['cost/dist'] = wandb.Histogram(np.asarray(all_cost_samples, dtype=np.float32))
+                    if args.wandb_project and wandb is not None and all_rewards_samples and all_cost_samples:
+                        sample = min(2000, len(all_rewards_samples))
+                        idx = np.random.choice(len(all_rewards_samples), sample, replace=False)
+                        table = wandb.Table(
+                            data=[[float(all_rewards_samples[j]), float(all_cost_samples[j])] for j in idx],
+                            columns=["reward", "cost"]
+                        )
+                        wandb.log({
+                            "iteration": i,
+                            "scatter/reward_vs_cost": wandb.plot.scatter(table, "reward", "cost",
+                                                                        title="Reward vs Cost (sampled)")
+                        }, step=i)
+                except Exception:
+                    pass
             wandb.log(log_payload, step=i)
 
         # ES update on engine 0 (exactly like countdown)
@@ -659,12 +700,24 @@ def main(args):
 
         # Periodic evaluation during training
         if args.eval_every > 0 and ((i + 1) % args.eval_every == 0):
-            eval_results_i = run_final_evaluation(engines[0], eval_prompts, args.scorer_url, args)
+            eval_results_i = run_final_evaluation(engines[0], eval_prompts, args.scorer_url, args, current_lambda)
             writer.add_scalar("eval/mean_reward", eval_results_i["mean_reward"], i)
             writer.add_scalar("eval/mean_cost", eval_results_i["mean_cost"], i)
             writer.add_scalar("eval/mean_combined", eval_results_i["mean_combined"], i)
             if args.wandb_project and wandb is not None:
+                rows = []
+                # cap to prevent huge logs
+                cap = min(10, len(eval_results_i["eval_prompts"]))
+                for k in range(cap):
+                    prompt = eval_results_i["eval_prompts"][k]
+                    resp   = eval_results_i["eval_outputs"][k].outputs[0].text
+                    r = float(eval_results_i["scores_raw"]["per_sample_reward"][k])
+                    c = float(eval_results_i["scores_raw"]["per_sample_cost"][k])
+                    rows.append([prompt, resp, r, c])
+                table = wandb.Table(columns=["prompt", "response", "reward", "cost"], data=rows)
                 wandb.log({
+                    "iteration": i,
+                    "eval/samples": table,
                     'eval/mean_reward': eval_results_i['mean_reward'],
                     'eval/mean_cost': eval_results_i['mean_cost'],
                     'eval/mean_combined': eval_results_i['mean_combined'],
@@ -685,7 +738,7 @@ def main(args):
     print("FINAL EVALUATION")
     print("="*80)
 
-    eval_results = run_final_evaluation(engines[0], eval_prompts, args.scorer_url, args)
+    eval_results = run_final_evaluation(engines[0], eval_prompts, args.scorer_url, args, current_lambda)
 
     print(f"\nMean Reward: {eval_results['mean_reward']:.4f}")
     print(f"Mean Cost: {eval_results['mean_cost']:.4f}")
@@ -728,6 +781,8 @@ def main(args):
     # Save final HF-format checkpoint to 'latest_hf'
     try:
         save_hf_latest_from_engine(engines[0], args.num_iterations)
+        log_artifact_dir(f"{model_saves_dir}/latest_hf", name=f"{wandb.run.id}-latest_hf", type_="model")
+
         print("Final HF-format checkpoint saved to latest_hf.")
     except Exception as e:
         print(f"Warning: failed to save final HF-format checkpoint: {e}")
@@ -740,6 +795,7 @@ def main(args):
             "save_self_weights_to_disk", args=(f"{final_model_path}/pytorch_model.pth",)
         )
     )
+    log_artifact_dir(final_model_path, name=f"{wandb.run.id}-final_model", type_="model")
     print(f"Final model weights saved to {final_model_path}.")
 
     cleanup()
