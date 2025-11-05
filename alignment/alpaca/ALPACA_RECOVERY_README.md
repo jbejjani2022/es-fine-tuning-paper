@@ -5,7 +5,7 @@ This directory contains scripts to recover the full Alpaca-7B model weights from
 ## Quick Start
 
 ```bash
-bash /n/home07/itamarf/es-fine-tuning-paper/alignment/recover_alpaca_full.sh
+bash /n/home07/itamarf/es-fine-tuning-paper/alignment/alpaca/recover_alpaca_full.sh
 ```
 
 ## What This Does
@@ -27,7 +27,7 @@ The script will automatically download the models from HuggingFace using Python 
 If you prefer to download the models separately first:
 
 ```bash
-cd /n/home07/itamarf/es-fine-tuning-paper/alignment
+cd /n/home07/itamarf/es-fine-tuning-paper/alignment/alpaca
 python download_models.py --base-dir /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models
 ```
 
@@ -82,7 +82,7 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 If you want to run just the Python script directly:
 
 ```bash
-cd /n/home07/itamarf/es-fine-tuning-paper/alignment
+cd /n/home07/itamarf/es-fine-tuning-paper/alignment/alpaca
 
 python recover_alpaca_weights.py \
     --path_raw /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/llama-7b-hf \
@@ -121,7 +121,7 @@ Instead of relying on the strict integrity check, we verify correctness by:
 2. **Verification script**: Run `verify_alpaca.py` to test multiple prompts:
 
 ```bash
-python verify_alpaca.py --model_path /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+python /n/home07/itamarf/es-fine-tuning-paper/alignment/alpaca/verify_alpaca.py --model_path /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
 ```
 
 This tests that the model:
@@ -134,7 +134,7 @@ This tests that the model:
 Recovery requires ~60GB RAM to load both models simultaneously. Use SLURM:
 
 ```bash
-sbatch /n/home07/itamarf/es-fine-tuning-paper/alignment/slurm_recover_alpaca.sh
+sbatch /n/home07/itamarf/es-fine-tuning-paper/alignment/alpaca/slurm_recover_alpaca.sh
 ```
 
 This script:
