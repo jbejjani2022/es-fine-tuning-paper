@@ -5,6 +5,7 @@ Compares with expected Alpaca-style responses.
 """
 
 import argparse
+import os
 import torch
 import transformers
 
@@ -42,25 +43,61 @@ def format_instruction(instruction, input_text=""):
         )
 
 
-def test_model(model_path, device="cpu"):
+def test_model(model_path, device="cpu", use_vllm=False, vllm_ckpt="", bf16=False,
+               max_new_tokens=100, temperature=0.7, top_p=0.9):
     """Test the model with various prompts."""
     print(f"\n{'='*80}")
     print(f"Loading model from: {model_path}")
     print(f"{'='*80}\n")
     
     try:
-        model = transformers.AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map={"": torch.device(device)},
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            low_cpu_mem_usage=True,
-        )
-        tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
-        
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        
-        print("✓ Model loaded successfully!\n")
+        model = None
+        tokenizer = None
+        llm = None
+
+        if use_vllm:
+            # Lazy imports to avoid requiring vLLM when not used
+            import ray
+            from vllm import LLM, SamplingParams
+
+            ray.init(address="local", include_dashboard=False, ignore_reinit_error=True)
+
+            class _ESNcclLLM(LLM):
+                def __init__(self, *l_args, **l_kwargs):
+                    os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+                    super().__init__(*l_args, **l_kwargs)
+
+            ESNcclLLMRemote = ray.remote(num_cpus=8, num_gpus=1)(_ESNcclLLM)
+            llm = ESNcclLLMRemote.remote(
+                model=model_path,               # base HF folder (tokenizer/config)
+                tensor_parallel_size=1,
+                distributed_executor_backend="mp",
+                worker_extension_cls="utils.worker_extn.WorkerExtension",
+                dtype=("bfloat16" if bf16 and torch.cuda.is_available() else "float16"),
+                enable_prefix_caching=False,
+                enforce_eager=False,
+                # Keep KV cache modest
+                max_model_len=max_new_tokens + 64,
+                gpu_memory_utilization=0.6,
+            )
+            if not vllm_ckpt:
+                raise ValueError("When --use_vllm is set, you must pass --vllm_ckpt to your fused .pth.")
+            # Load fused checkpoint into the engine via WorkerExtension RPC
+            ray.get(llm.collective_rpc.remote("load_self_weights_from_disk", args=(vllm_ckpt,)))
+            print("✓ vLLM engine initialized!\n")
+        else:
+            model = transformers.AutoModelForCausalLM.from_pretrained(
+                model_path,
+                device_map={"": torch.device(device)},
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                low_cpu_mem_usage=True,
+            )
+            tokenizer = transformers.AutoTokenizer.from_pretrained(model_path)
+            
+            if tokenizer.pad_token is None:
+                tokenizer.pad_token = tokenizer.eos_token
+            
+            print("✓ Model loaded successfully!\n")
     except Exception as e:
         print(f"✗ Error loading model: {e}")
         return False
@@ -79,21 +116,36 @@ def test_model(model_path, device="cpu"):
         print(f"\nGenerating response...")
         
         try:
-            inputs = tokenizer(prompt, return_tensors="pt")
-            if device == "cuda":
-                inputs = {k: v.to(device) for k, v in inputs.items()}
-            
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=100,
-                    temperature=0.7,
-                    do_sample=True,
-                    top_p=0.9,
+            if use_vllm:
+                # vLLM path
+                import ray  # imported above when initializing
+                from vllm import SamplingParams
+
+                sampling = SamplingParams(
+                    max_tokens=max_new_tokens,
+                    temperature=max(temperature, 1e-6),
+                    top_p=top_p,
+                    seed=42,
                 )
-            
-            response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            response = response[len(prompt):].strip()
+                outputs = ray.get(llm.generate.remote([prompt], sampling, use_tqdm=False))
+                response = outputs[0].outputs[0].text.strip()
+            else:
+                # HF path
+                inputs = tokenizer(prompt, return_tensors="pt")
+                if device == "cuda":
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                
+                with torch.no_grad():
+                    outputs = model.generate(
+                        **inputs,
+                        max_new_tokens=max_new_tokens,
+                        temperature=temperature,
+                        do_sample=(temperature > 0.0),
+                        top_p=top_p,
+                    )
+                
+                response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                response = response[len(prompt):].strip()
             
             print(f"\nResponse: {response}")
             
@@ -112,6 +164,16 @@ def test_model(model_path, device="cpu"):
             print(f"\n✗ Error during generation: {e}")
             all_passed = False
     
+    # Teardown vLLM engine if used (free GPU)
+    if use_vllm:
+        try:
+            import ray
+            if 'llm' in locals() and llm is not None:
+                ray.kill(llm)
+            ray.shutdown()
+        except Exception:
+            pass
+
     print(f"\n{'='*80}")
     if all_passed:
         print("✓ All tests passed! The model appears to be working correctly.")
@@ -137,10 +199,53 @@ def main():
         choices=["cpu", "cuda"],
         help="Device to use for inference",
     )
+    parser.add_argument(
+        "--use_vllm",
+        action="store_true",
+        help="Use vLLM for generation (requires --vllm_ckpt to a fused .pth)",
+    )
+    parser.add_argument(
+        "--vllm_ckpt",
+        type=str,
+        default="",
+        help="Path to fused vLLM checkpoint (.pth) saved during ES training.",
+    )
+    parser.add_argument(
+        "--bf16",
+        action="store_true",
+        help="Use bfloat16 for vLLM (if CUDA is available)",
+    )
+    parser.add_argument(
+        "--max_new_tokens",
+        type=int,
+        default=100,
+        help="Max new tokens to generate",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Sampling temperature",
+    )
+    parser.add_argument(
+        "--top_p",
+        type=float,
+        default=0.9,
+        help="Nucleus sampling top-p",
+    )
     
     args = parser.parse_args()
     
-    success = test_model(args.model_path, args.device)
+    success = test_model(
+        args.model_path,
+        args.device,
+        args.use_vllm,
+        args.vllm_ckpt,
+        args.bf16,
+        args.max_new_tokens,
+        args.temperature,
+        args.top_p,
+    )
     exit(0 if success else 1)
 
 
