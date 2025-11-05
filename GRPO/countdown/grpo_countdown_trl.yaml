@@ -1,0 +1,47 @@
+## TRL GRPO config for the Countdown task (Qwen-2.5-1.5B-Instruct)
+
+# Base model
+model_name: Qwen/Qwen2.5-1.5B-Instruct
+
+# Data (train/eval split from countdown.json)
+data_json: /n/home07/itamarf/es-fine-tuning-paper/countdown/data/countdown.json
+prompt_key: context
+numbers_key: numbers
+target_key: target
+
+# GRPO group size for Countdown (Appendix A.1: N = 8 common for GRPO)
+num_generations: 8
+
+# Lengths
+max_prompt_length: 512
+max_completion_length: 384
+
+# Decoding during training
+temperature: 0.7
+top_p: 1.0
+
+# Optim defaults; learning_rate can be overridden by CLI
+learning_rate: 1.0e-6
+lr_scheduler_type: constant
+warmup_steps: 0
+num_train_epochs: 1
+max_steps: 500
+gradient_accumulation_steps: 16
+
+# Logging / output
+project: es_countdown
+entity: itamarf
+output_dir: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_countdown_1p5B_500steps
+save_steps: 200
+logging_steps: 10
+
+# Sweep (from image: (beta, lr) in {(1e-3,1e-6),(1e-3,1e-5),(5e-3,1e-6),(5e-3,1e-5)})
+betas: [5e-3]
+learning_rates: [1.0e-6]
+seeds: [42]
+
+# Trainer specifics
+loss_type: grpo
+
+
+
