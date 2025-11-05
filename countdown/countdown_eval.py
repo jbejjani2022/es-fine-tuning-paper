@@ -138,13 +138,15 @@ def main():
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
         
-        # Decode outputs
+        # Decode outputs - only the newly generated tokens
         generated_texts = []
         for i in range(len(input_texts)):
+            # Extract only the generated portion (after input)
+            generated_ids = outputs[i][len(input_ids[i]):]
             try:
-                generated_text = tokenizer.decode(outputs[i], skip_special_tokens=True)
+                generated_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
             except TypeError:
-                tokens = tokenizer.convert_ids_to_tokens(outputs[i], skip_special_tokens=True)
+                tokens = tokenizer.convert_ids_to_tokens(generated_ids, skip_special_tokens=True)
                 filtered = [t for t in tokens if t is not None]
                 generated_text = tokenizer.convert_tokens_to_string(filtered)
             generated_texts.append(generated_text)
@@ -159,13 +161,9 @@ def main():
             # Parse target
             target = int(target_text) if target_text.isdigit() else None
             
-            # Extract model response (after "assistant:" if present)
-            model_response = gen_text
-            if "assistant:" in gen_text:
-                model_response = gen_text.split("assistant:")[-1].strip()
-            
-            # Calculate reward
-            reward_result = reward_function(model_response, numbers, target)
+            # Calculate reward using the generated text directly
+            # (gen_text now contains only the model's response, not the input prompt)
+            reward_result = reward_function(gen_text, numbers, target)
             combined_reward = reward_result["reward"]
             format_reward = reward_result["reward_info"]["format_reward"]
             answer_reward = reward_result["reward_info"]["answer_reward"]
