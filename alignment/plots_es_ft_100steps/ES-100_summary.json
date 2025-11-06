@@ -1,0 +1,26 @@
+{
+  "counts": {
+    "SH": 706,
+    "SU": 1490,
+    "UH": 357,
+    "UU": 483
+  },
+  "percents": {
+    "SH": 23.254281949934125,
+    "SU": 49.077733860342555,
+    "UH": 11.75889328063241,
+    "UU": 15.909090909090908
+  },
+  "safe_ratio": 72.33201581027669,
+  "R_mean": -0.6168516874313354,
+  "R_std": 1.314483880996704,
+  "C_mean": -1.1361764669418335,
+  "C_std": 3.4524786472320557,
+  "num_points": 3036,
+  "used_policy_model": true,
+  "used_vllm": true,
+  "policy_vllm_ckpt": "/n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/es-ft-experiment/alignment_nccl_20251104_160009/model_saves/tmp_iter_100.pth",
+  "dataset_split": "test",
+  "reward_model": "PKU-Alignment/beaver-7b-unified-reward",
+  "cost_model": "PKU-Alignment/beaver-7b-unified-cost"
+}

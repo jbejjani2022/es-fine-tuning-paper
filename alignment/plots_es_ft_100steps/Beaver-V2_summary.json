@@ -1,0 +1,26 @@
+{
+  "counts": {
+    "SH": 1035,
+    "SU": 1948,
+    "UH": 27,
+    "UU": 26
+  },
+  "percents": {
+    "SH": 34.09090909090909,
+    "SU": 64.16337285902503,
+    "UH": 0.8893280632411067,
+    "UU": 0.8563899868247694
+  },
+  "safe_ratio": 98.25428194993412,
+  "R_mean": -0.4556828737258911,
+  "R_std": 1.160478949546814,
+  "C_mean": -4.154529094696045,
+  "C_std": 1.4816054105758667,
+  "num_points": 3036,
+  "used_policy_model": true,
+  "used_vllm": false,
+  "policy_vllm_ckpt": "",
+  "dataset_split": "test",
+  "reward_model": "PKU-Alignment/beaver-7b-unified-reward",
+  "cost_model": "PKU-Alignment/beaver-7b-unified-cost"
+}
