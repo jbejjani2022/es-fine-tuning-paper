@@ -81,7 +81,8 @@ def parse_args() -> argparse.Namespace:
                         help='Use vLLM for generation (required when --policy_vllm_ckpt is set).')
     parser.add_argument('--policy_vllm_ckpt', type=str, default='',
                         help='Path to fused vLLM checkpoint (.pth) saved during ES training.')
-
+    parser.add_argument('--model_name', type=str, default='',
+                        help='Model name for saving the results.')
     # Output
     parser.add_argument('--output_dir', type=str, default='alignment/plots')
 
@@ -269,9 +270,7 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     base = args.policy_model_path.split('/')[-1] if args.policy_model_path else 'dataset'
-    tag = f"{base}_{args.split}_n{len(labels_np)}_es_ft"
-    if use_vllm and args.policy_vllm_ckpt:
-        tag += "_vllm"
+    tag = f"{args.model_name}"
 
     np.save(os.path.join(args.output_dir, f"{tag}_Rs.npy"), Rs)
     np.save(os.path.join(args.output_dir, f"{tag}_Cs.npy"), Cs)
