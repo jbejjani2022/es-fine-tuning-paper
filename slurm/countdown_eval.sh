@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --gpus-per-node=1
-#SBATCH --time=12:00:00
+#SBATCH --time=3:00:00
 #SBATCH --mem=256G
 #SBATCH -o output/job.%N.%j.out          # STDOUT
 #SBATCH -e error/job.%N.%j.err           # STDERR
@@ -29,6 +29,8 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # for model in Qwen/Qwen2.5-0.5B-Instruct Qwen/Qwen2.5-1.5B-Instruct Qwen/Qwen2.5-3B-Instruct Qwen/Qwen2.5-7B-Instruct
 # for model in meta-llama/Llama-3.2-1B-Instruct meta-llama/Llama-3.2-3B-Instruct meta-llama/Llama-3.1-8B-Instruct
+# for model in /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_countdown_1p5B/beta0.005_lr1e-06_seed42/checkpoint-1000
+for model in /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_countdown_1p5B_500steps/beta0.005_lr1e-06_seed42
 do
     python countdown/countdown_eval.py \
         --model $model \
