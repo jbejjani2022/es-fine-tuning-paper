@@ -5,6 +5,16 @@ Robustness Evaluation Summary Statistics Script
 For a given sigma and perturbation type, this script reports the mean and std 
 of normalized_reward_degradation and KL divergence values across the 8 trials 
 for each model and checkpoint seed.
+
+Example usage:
+    # Display per-seed statistics for sigma=0.01 and lm_head perturbations
+    python summarize.py --sigma 0.01 --perturbation_type lm_head.weight
+    
+    # Display aggregated statistics across all seeds
+    python summarize.py --sigma 0.01 --perturbation_type all_model_params --aggregate
+    
+    # Analyze a different sigma value
+    python summarize.py --sigma 0.005 --perturbation_type lm_head.weight
 """
 
 import argparse

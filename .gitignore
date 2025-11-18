@@ -11,3 +11,6 @@ wandb/
 model_saves/
 events.*
 data_viz/
+robustness_eval/
+perturbation_results/
+global_robustness_eval/

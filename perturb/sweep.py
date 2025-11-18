@@ -1,7 +1,7 @@
 """
 Robustness Evaluation Sweep Script
 
-This script evaluates the robustness of fine-tuned models across multiple checkpoints,
+This script evaluates the robustness of Conciseness fine-tuned models across multiple checkpoints,
 perturbation types, and noise levels (sigmas). Results are saved to a CSV file.
 """
 
@@ -47,16 +47,16 @@ map_models_to_checkpoints = {
         "/n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/GRPO_temp_0.7/beta0.0464_seed44/checkpoint-1000"
     ],
     "es_small_sig": [
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/0/es_random_seed0_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/1/es_random_seed1_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final"
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/0/es_random_seed0_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/1/es_random_seed1_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_small_sig/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.001_alpha0.0005_bf16_threads1_question_num2_final"
     ],
     "es_big_sig": [
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/0/es_random_seed0_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/1/es_random_seed1_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
-        "/n/holylabs/LABS/sham_lab/Users/jbejjani/es-fine-tuning-paper/checkpoints/conciseness/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final"
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_big_sig/Qwen/Qwen2.5-7B-Instruct/0/es_random_seed0_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_big_sig/Qwen/Qwen2.5-7B-Instruct/1/es_random_seed1_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_big_sig/Qwen/Qwen2.5-7B-Instruct/2/es_random_seed2_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final",
+        "/n/netscratch/sham_lab/Everyone/jbejjani/es-ft-experiments/checkpoints/conciseness_big_sig/Qwen/Qwen2.5-7B-Instruct/3/es_random_seed3_pop30_iter1000_sigma0.0015_alpha0.00075_bf16_threads1_question_num2_final"
     ]
 }
 
