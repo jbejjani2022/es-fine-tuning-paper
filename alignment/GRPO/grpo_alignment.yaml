@@ -1,0 +1,62 @@
+model_name: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+train_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/custom_train_250.jsonl
+eval_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/custom_eval_500.jsonl
+prompt_key: prompt
+scorer_url: http://holygpu8a17404:8000
+
+# ---------- Lambda / constraint (matched to ES defaults) ----------
+lambda_cost: 1.0              # initial λ (ES uses --lambda_cost 1)
+lambda_adapt: true            # turn on Lagrangian adaptation
+cost_threshold_d: 0.0         # J_C = E[C] + d
+lambda_lr: 0.005              # learning rate for ln λ, same as ES
+lambda_min: 1.0e-4
+lambda_max: 5.0
+jc_ema_beta: 0.9
+lambda_pos_cost_only: true    # only update on positive violations
+
+# ---------- Scorer / logging convenience ----------
+scorer_batch_size: 32         # match ES --scorer_batch_size 32
+scorer_batch_size_eval: 32    # batch size for scorer during eval pass
+eval_batch_size: 64           # prompts per eval generate batch (greedy, like ES)
+scatter_every: 50             # steps between train scatter logs
+hist_every: 25                # steps between train histogram logs
+scatter_max_points: 2000      # max points in each scatter
+
+# ---------- GRPO / generation ----------
+num_generations: 30
+max_prompt_length: 512
+max_completion_length: 512
+temperature: 0.7
+top_p: 1.0
+
+learning_rate: 5.0e-6
+lr_scheduler_type: constant
+warmup_steps: 0
+num_train_epochs: 1
+max_steps: 500
+gradient_accumulation_steps: 15
+per_device_train_batch_size: 1
+per_device_eval_batch_size: 2
+
+# ---------- Evaluation ----------
+eval_every: 100               # run eval (greedy) every 100 global steps
+
+# ---------- Logging / W&B ----------
+project: grpo_alignment
+entity: itamarf
+output_dir: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output
+save_steps: 100
+logging_steps: 5
+
+loss_type: grpo
+
+# ---------- Debug ----------
+debug_log_every: 1          # every 50 reward calls, log a table of train examples
+debug_log_n_samples: 16       # up to 16 rows in that table
+debug_print_first: true       # print one example prompt/response + stats to stdout on first call
+# Log a full table for every batch (prompt, completion, reward, cost, combined)
+
+debug_print_samples_per_batch: 3
+debug_print_sample_chars: 2000
+# Optional: for eval tables
+eval_table_n_samples: 16
