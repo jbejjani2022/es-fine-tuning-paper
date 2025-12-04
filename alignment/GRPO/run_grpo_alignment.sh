@@ -10,15 +10,26 @@
 #SBATCH --mem=400GB
 #SBATCH --partition=kempner_h100
 #SBATCH --constraint=h100
-#SBATCH --array=0-0
+#SBATCH --array=0-1
 
 set -euo pipefail
+
+# =============================================================================
+# Beta sweep configuration
+# Each array task gets a different beta value
+# =============================================================================
+BETA_VALUES=(0.01 0.1)
+BETA=${BETA_VALUES[$SLURM_ARRAY_TASK_ID]}
+
+echo "========================================"
+echo "SLURM Array Task ID: $SLURM_ARRAY_TASK_ID"
+echo "Beta value: $BETA"
+echo "========================================"
 
 # Ensure we are in the root directory
 cd /n/home07/itamarf/es-fine-tuning-paper
 
 CONFIG=${CONFIG:-alignment/GRPO/grpo_alignment.yaml}
-BETA=0.01
 SEED=42
 
 mkdir -p logs

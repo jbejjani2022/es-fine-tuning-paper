@@ -24,6 +24,10 @@ class ScoreRequest(BaseModel):
     prompts: List[str]
     responses: List[str]
 
+class ScoreTextsRequest(BaseModel):
+    """Request model for scoring full pre-formatted texts directly."""
+    texts: List[str]
+
 class ScoreResponse(BaseModel):
     rewards: List[float]
     costs: List[float]
@@ -61,7 +65,8 @@ async def startup_event():
     # Get configuration from environment variables
     reward_model_name = os.environ.get("REWARD_MODEL", "PKU-Alignment/beaver-7b-v1.0-reward")
     cost_model_name = os.environ.get("COST_MODEL", "PKU-Alignment/beaver-7b-v1.0-cost")
-    max_length = int(os.environ.get("MAX_LENGTH", "2048"))
+    # Match Beaver model training max_length (Safe-RLHF paper Tables 2 & 3)
+    max_length = int(os.environ.get("MAX_LENGTH", "512"))
     use_bf16 = os.environ.get("USE_BF16", "false").lower() == "true"
     
     # Set device
@@ -190,6 +195,71 @@ async def score_responses_batch(request: ScoreRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error scoring responses: {str(e)}")
+
+
+@app.post("/score_texts", response_model=ScoreResponse)
+async def score_full_texts(request: ScoreTextsRequest):
+    """Score pre-formatted full texts directly (no splitting/rebuilding).
+    
+    Expects texts already in the format:
+      "BEGINNING OF CONVERSATION: USER: {user} ASSISTANT:{response}"
+    
+    This endpoint just appends EOS and scores, avoiding fragile parsing.
+    """
+    if len(request.texts) == 0:
+        return ScoreResponse(rewards=[], costs=[])
+    
+    # Debug: log first text received
+    if len(request.texts) > 0:
+        print(f"[score_texts] Received {len(request.texts)} texts")
+        print(f"[score_texts] First text (first 200 chars): {repr(request.texts[0][:200])}")
+    
+    try:
+        # Just append EOS token if not already present
+        r_texts = [t if t.endswith(r_eos) else t + r_eos for t in request.texts]
+        c_texts = [t if t.endswith(c_eos) else t + c_eos for t in request.texts]
+        
+        with torch.no_grad():
+            # Batch process with reward model
+            reward_inputs = reward_tokenizer(
+                r_texts,
+                return_tensors="pt",
+                max_length=max_length,
+                truncation=True,
+                padding=True
+            ).to(device)
+            
+            reward_outputs = reward_model(**reward_inputs)
+            reward_scores = reward_outputs.end_scores.squeeze(-1).cpu().tolist()
+            
+            # Ensure it's a list even for single item
+            if not isinstance(reward_scores, list):
+                reward_scores = [reward_scores]
+            
+            # Batch process with cost model
+            cost_inputs = cost_tokenizer(
+                c_texts,
+                return_tensors="pt",
+                max_length=max_length,
+                truncation=True,
+                padding=True
+            ).to(device)
+            
+            cost_outputs = cost_model(**cost_inputs)
+            cost_scores = cost_outputs.end_scores.squeeze(-1).cpu().tolist()
+            
+            # Ensure it's a list even for single item
+            if not isinstance(cost_scores, list):
+                cost_scores = [cost_scores]
+        
+        # Debug: log scores for first item
+        if len(reward_scores) > 0:
+            print(f"[score_texts] First score: reward={reward_scores[0]:.4f}, cost={cost_scores[0]:.4f}")
+        
+        return ScoreResponse(rewards=reward_scores, costs=cost_scores)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error scoring texts: {str(e)}")
 
 if __name__ == "__main__":
     # Run the service

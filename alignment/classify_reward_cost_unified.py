@@ -99,10 +99,16 @@ def main():
     # Decide backend early
     use_vllm = bool(args.policy_vllm_ckpt) or args.policy_use_vllm
 
+    # max_model_len = prompt tokens + generation tokens
+    # Prompts are ~100-300 tokens, so 512 buffer is safe
+    prompt_buffer = 512
+    vllm_max_model_len = args.policy_max_new_tokens + prompt_buffer
+
     # ----- policy model / generator (HF or vLLM) -----
     policy_tok: Optional[HFAutoTokenizer] = None
     policy_model: Optional[AutoModelForCausalLM] = None
     llm = None
+    use_ray_remote = False
 
     if args.policy_model_path and not use_vllm:
         # HF baseline / HF checkpoint
@@ -113,31 +119,40 @@ def main():
         ).to(device).eval()
 
     elif args.policy_model_path and use_vllm:
-        # vLLM engine (single GPU) to load fused .pth weights
-        ray.init(address="local", include_dashboard=False, ignore_reinit_error=True)
+        if args.policy_vllm_ckpt:
+            # vLLM engine with fused .pth weights from ES training
+            ray.init(address="local", include_dashboard=False, ignore_reinit_error=True)
 
-        class _ESNcclLLM(LLM):
-            def __init__(self, *l_args, **l_kwargs):
-                os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
-                super().__init__(*l_args, **l_kwargs)
+            class _ESNcclLLM(LLM):
+                def __init__(self, *l_args, **l_kwargs):
+                    os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+                    super().__init__(*l_args, **l_kwargs)
 
-        ESNcclLLMRemote = ray.remote(num_cpus=8, num_gpus=1)(_ESNcclLLM)
-        llm = ESNcclLLMRemote.remote(
-            model=args.policy_model_path,               # base HF folder (tokenizer/config)
-            tensor_parallel_size=1,
-            distributed_executor_backend="mp",
-            worker_extension_cls="utils.worker_extn.WorkerExtension",
-            dtype=("bfloat16" if args.bf16 and torch.cuda.is_available() else "float16"),
-            enable_prefix_caching=False,
-            enforce_eager=False,
-            # Reduce KV cache footprint a bit
-            max_model_len=args.policy_max_new_tokens + 64,
-            gpu_memory_utilization=0.6,
-        )
-        if not args.policy_vllm_ckpt:
-            raise ValueError("When --policy_use_vllm is set, you must pass --policy_vllm_ckpt to your fused .pth.")
-        # Load fused checkpoint into the engine via WorkerExtension RPC
-        ray.get(llm.collective_rpc.remote("load_self_weights_from_disk", args=(args.policy_vllm_ckpt,)))
+            ESNcclLLMRemote = ray.remote(num_cpus=8, num_gpus=1)(_ESNcclLLM)
+            llm = ESNcclLLMRemote.remote(
+                model=args.policy_model_path,               # base HF folder (tokenizer/config)
+                tensor_parallel_size=1,
+                distributed_executor_backend="mp",
+                worker_extension_cls="utils.worker_extn.WorkerExtension",
+                dtype=("bfloat16" if args.bf16 and torch.cuda.is_available() else "float16"),
+                enable_prefix_caching=False,
+                enforce_eager=False,
+                max_model_len=vllm_max_model_len,
+                gpu_memory_utilization=0.6,
+            )
+            # Load fused checkpoint into the engine via WorkerExtension RPC
+            ray.get(llm.collective_rpc.remote("load_self_weights_from_disk", args=(args.policy_vllm_ckpt,)))
+            use_ray_remote = True
+        else:
+            # Simple vLLM with standard HF checkpoint (much faster than HF generate)
+            llm = LLM(
+                model=args.policy_model_path,
+                dtype=("bfloat16" if args.bf16 and torch.cuda.is_available() else "float16"),
+                tensor_parallel_size=1,
+                max_model_len=vllm_max_model_len,
+                gpu_memory_utilization=0.85,
+            )
+            use_ray_remote = False
 
     # ----- dataset / prompts -----
     records = []
@@ -187,15 +202,23 @@ def main():
             temperature=max(args.policy_temperature, 1e-6),
             seed=42
         )
-        outputs = ray.get(llm.generate.remote(conv_prompts, sampling, use_tqdm=True))
+        if use_ray_remote:
+            outputs = ray.get(llm.generate.remote(conv_prompts, sampling, use_tqdm=True))
+        else:
+            outputs = llm.generate(conv_prompts, sampling, use_tqdm=True)
         for i, out in enumerate(outputs):
             records[rec_idx[i]]["_gen_response"] = out.outputs[0].text
 
     # ====== TEARDOWN vLLM (free GPU) BEFORE LOADING SCORERS ======
     try:
         if llm is not None:
-            ray.kill(llm)
-            ray.shutdown()
+            if use_ray_remote:
+                ray.kill(llm)
+                ray.shutdown()
+            else:
+                # Direct vLLM: delete to free GPU memory
+                del llm
+                torch.cuda.empty_cache()
             llm = None
     except Exception:
         pass

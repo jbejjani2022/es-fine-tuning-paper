@@ -13,9 +13,12 @@
 #SBATCH --constraint=h100
 
 # Set scorer service parameters (using same models as working code)
+# export REWARD_MODEL="PKU-Alignment/beaver-7b-v1.0-reward"
+# export COST_MODEL="PKU-Alignment/beaver-7b-v1.0-cost"
 export REWARD_MODEL="PKU-Alignment/beaver-7b-unified-reward"
 export COST_MODEL="PKU-Alignment/beaver-7b-unified-cost"
-export MAX_LENGTH=2048
+# Match Beaver model training max_length (see Safe-RLHF paper Tables 2 & 3)
+export MAX_LENGTH=576 # add buffer for prompt
 export USE_BF16=false
 
 
