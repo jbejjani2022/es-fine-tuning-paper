@@ -1,0 +1,111 @@
+# Sweep configurations for classify_reward_cost_unified.py
+# Each entry will be run as a separate SLURM array job
+
+# Common settings (can be overridden per-sweep)
+defaults:
+  dataset_name: PKU-Alignment/PKU-SafeRLHF
+  split: test
+  policy_max_new_tokens: 512
+  policy_temperature: 0.0
+  reward_model: PKU-Alignment/beaver-7b-unified-reward
+  cost_model: PKU-Alignment/beaver-7b-unified-cost
+  num_samples: 3036
+  bf16: true
+  policy_use_vllm: true
+
+sweeps:
+  # # ============ ES Fine-tuned checkpoints ============
+  # - model_name: ES-100
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+  #   policy_vllm_ckpt: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/es-ft-experiment/alignment_nccl_20251104_160009/model_saves/tmp_iter_100.pth
+  #   output_dir: alignment/results
+
+  # # ============ ES Fine-tuned  ============
+  # - model_name: ES-500-f_nmtt_n50
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+  #   policy_vllm_ckpt: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/es-ft-experiment/alignment_nccl_20251202_205024/model_saves/tmp_iter_500.pth
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: ES-500-f-nmt
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+  #   policy_vllm_ckpt: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/es-ft-experiment/alignment_nccl_20251202_092048/model_saves/tmp_iter_500.pth
+  #   output_dir: alignment/results-fixed
+
+  # # ============ GRPO checkpoints ============
+  # - model_name: GRPO-beta0.001-f
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.001_seed42_fixed/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.01-f
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_fixed/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.1-f
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_fixed/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta1.0-f
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta1.0_seed42_fixed/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # # ============ GRPO No Multiturn checkpoints ============
+  # - model_name: GRPO-beta0.001-f_nmtt
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.001_seed42_fixed_no_multiturn/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.01-f_nmtt
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_fixed_no_multiturn/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.1-f_nmtt
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_fixed_no_multiturn/checkpoint-500/
+  #   output_dir: alignment/results-fixed_no_multiturn
+
+  # - model_name: GRPO-beta1.0-f_nmtt
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta1.0_seed42_fixed_no_multiturn/checkpoint-500/
+  #   output_dir: alignment/results-fixed_no_multiturn
+  # # # ============ Baseline models ============
+  # # - model_name: Alpaca-7b
+  # #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
+  # #   output_dir: alignment/results
+
+  # # - model_name: Beaver-V1
+  # #   policy_model_path: PKU-Alignment/beaver-7b-v1.0
+  # #   output_dir: alignment/results
+
+  # # ============ GRPO per device batch size  checkpoints ============
+
+  # - model_name: GRPO-beta0.1-f-nmt-pdbs4
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_fixed_no_multiturn_pdbs4/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # # # ============ GRPO unified checkpoints ============
+
+  # - model_name: GRPO-beta0.01-f_unified
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_fixed_unified/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.1-f_unified
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_fixed_unified/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # # ============ GRPO unified not fixed checkpoints ============
+
+  - model_name: GRPO-beta0.01-unified
+    policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_unified/checkpoint-500/
+    output_dir: alignment/results-fixed
+
+  - model_name: GRPO-beta0.1-unified
+    policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_unified/checkpoint-500/
+    output_dir: alignment/results-fixed
+
+
+  # # # ============ GRPO no multiturn n=50 checkpoints ============
+
+  # - model_name: GRPO-beta0.01-f_nmtt_n50
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_fixed_no_multiturn_50/checkpoint-500/
+  #   output_dir: alignment/results-fixed
+
+  # - model_name: GRPO-beta0.1-f_nmtt_n50
+  #   policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_fixed_no_multiturn_50/checkpoint-500/
+  #   output_dir: alignment/results-fixed
