@@ -93,11 +93,11 @@ sweeps:
 
   - model_name: GRPO-beta0.01-unified
     policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.01_seed42_unified/checkpoint-500/
-    output_dir: alignment/results-fixed
+    output_dir: alignment/outputs/model_comparisons
 
   - model_name: GRPO-beta0.1-unified
     policy_model_path: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/beta0.1_seed42_unified/checkpoint-500/
-    output_dir: alignment/results-fixed
+    output_dir: alignment/outputs/model_comparisons
 
 
   # # # ============ GRPO no multiturn n=50 checkpoints ============

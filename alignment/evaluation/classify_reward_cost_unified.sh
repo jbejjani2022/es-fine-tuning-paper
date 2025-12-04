@@ -17,19 +17,21 @@
 # Sweep runner using SLURM job arrays + YAML config
 # 
 # Usage:
-#   sbatch alignment/classify_reward_cost_unified.sh                    # Run all sweeps
-#   sbatch --array=0-2 alignment/classify_reward_cost_unified.sh        # Run first 3 sweeps
-#   sbatch --array=0 alignment/classify_reward_cost_unified.sh          # Run only first sweep
-#   sbatch --array=1,3,4 alignment/classify_reward_cost_unified.sh      # Run specific sweeps
+#   sbatch alignment/evaluation/classify_reward_cost_unified.sh                    # Run all sweeps
+#   sbatch --array=0-2 alignment/evaluation/classify_reward_cost_unified.sh        # Run first 3 sweeps
+#   sbatch --array=0 alignment/evaluation/classify_reward_cost_unified.sh          # Run only first sweep
+#   sbatch --array=1,3,4 alignment/evaluation/classify_reward_cost_unified.sh      # Run specific sweeps
 #
 # To specify a different config file:
-#   CONFIG_FILE=my_sweeps.yaml sbatch alignment/classify_reward_cost_unified.sh
+#   CONFIG_FILE=my_sweeps.yaml sbatch alignment/evaluation/classify_reward_cost_unified.sh
 # ============================================================
 
 set -e
 
+cd /n/home07/itamarf/es-fine-tuning-paper
+
 # Config file path (can be overridden via environment variable)
-export CONFIG_FILE="${CONFIG_FILE:-alignment/sweep_configs.yaml}"
+export CONFIG_FILE="${CONFIG_FILE:-alignment/evaluation/sweep_configs.yaml}"
 
 # Validate config file exists
 if [ ! -f "$CONFIG_FILE" ]; then
@@ -53,7 +55,7 @@ import sys
 import os
 import subprocess
 
-config_file = os.environ.get('CONFIG_FILE', 'alignment/sweep_configs.yaml')
+config_file = os.environ.get('CONFIG_FILE', 'alignment/evaluation/sweep_configs.yaml')
 task_id = int(os.environ.get('TASK_ID', '0'))
 
 with open(config_file, 'r') as f:
@@ -74,7 +76,7 @@ print("-" * 60)
 merged = {**defaults, **sweep}
 
 # Build command line arguments
-cmd_parts = ["python", "alignment/classify_reward_cost_unified.py"]
+cmd_parts = ["python", "alignment/evaluation/classify_reward_cost_unified.py"]
 
 for key, value in merged.items():
     if key.startswith('_'):  # Skip internal keys
