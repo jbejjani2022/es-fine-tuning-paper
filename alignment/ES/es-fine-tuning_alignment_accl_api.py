@@ -90,6 +90,8 @@ def parse_args():
     parser.add_argument('--scorer_batch_size', type=int, default=16)
     parser.add_argument('--save_every', type=int, default=100, help='Save HF-format latest checkpoint every N iters (0=off)')
     parser.add_argument("--global_seed", type=int, help="Global random seed")
+    parser.add_argument("--resume_from", type=str, default=None, 
+                        help="Path to checkpoint directory to resume from (e.g., alignment_nccl_YYYYMMDD_HHMMSS)")
     
     args = parser.parse_args()
     
@@ -141,34 +143,21 @@ def launch_engines(num_engines, model_name):
 
 def call_scorer_api(scorer_url, texts, batch_size=16):
     """Call the external scorer API to get rewards and costs.
-    texts are of the form:
+    
+    texts are pre-formatted full conversation strings:
       "BEGINNING OF CONVERSATION: USER: {user} ASSISTANT:{response}"
-    We extract raw user and response to avoid double-prefixing on the server.
+    
+    We pass them directly to the scorer without splitting/rebuilding.
+    This follows the safe-rlhf pattern of passing the full sequence.
     """
     try:
-        prompts, responses = [], []
-        for text in texts:
-            # Robustly extract between USER: and ASSISTANT:
-            if 'USER:' in text and 'ASSISTANT:' in text:
-                user_part = text.split('USER:', 1)[1]
-                user = user_part.rsplit('ASSISTANT:', 1)[0].strip()
-                resp = text.split('ASSISTANT:', 1)[1]
-                prompts.append(user)
-                responses.append(resp)
-            else:
-                # Fallback: treat whole text as prompt, empty response
-                prompts.append(text)
-                responses.append("")
-
         all_rewards, all_costs = [], []
 
-        for i in range(0, len(prompts), batch_size):
+        for i in range(0, len(texts), batch_size):
             payload = {
-                "prompts": prompts[i:i+batch_size],
-                "responses": responses[i:i+batch_size],
+                "texts": texts[i:i+batch_size],
             }
-            t0 = time.time()
-            r = requests.post(f"{scorer_url}/score_batch", json=payload, timeout=60)
+            r = requests.post(f"{scorer_url}/score_texts", json=payload, timeout=60)
             r.raise_for_status()
             result = r.json()
             all_rewards.extend(result["rewards"])
@@ -275,6 +264,85 @@ def log_artifact_file(path, name, type_="evaluation"):
         art.add_file(path)
         wandb.log_artifact(art)
 
+
+def find_latest_checkpoint(checkpoint_dir: str):
+    """
+    Find the latest checkpoint in a run directory.
+    Returns (weights_path, metadata) or (None, None) if no checkpoint found.
+    """
+    model_saves_dir = os.path.join(checkpoint_dir, "model_saves")
+    if not os.path.isdir(model_saves_dir):
+        return None, None
+    
+    # Look for tmp_iter_*.pth files and find the latest
+    checkpoints = []
+    for name in os.listdir(model_saves_dir):
+        if name.startswith("tmp_iter_") and name.endswith(".pth"):
+            try:
+                iteration = int(name.replace("tmp_iter_", "").replace(".pth", ""))
+                checkpoints.append((iteration, os.path.join(model_saves_dir, name)))
+            except ValueError:
+                continue
+    
+    if not checkpoints:
+        # Also check for latest_hf directory with ckpt_meta.json
+        latest_hf = os.path.join(model_saves_dir, "latest_hf")
+        if os.path.isdir(latest_hf):
+            meta_path = os.path.join(latest_hf, "ckpt_meta.json")
+            if os.path.exists(meta_path):
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+                # latest_hf is an HF model dir, not a .pth file
+                return latest_hf, meta
+        return None, None
+    
+    # Sort by iteration and get the latest
+    checkpoints.sort(key=lambda x: x[0], reverse=True)
+    latest_iter, latest_path = checkpoints[0]
+    
+    # Look for corresponding metadata file
+    meta_path = latest_path.replace(".pth", "_meta.json")
+    metadata = None
+    if os.path.exists(meta_path):
+        with open(meta_path, "r") as f:
+            metadata = json.load(f)
+    else:
+        # Fallback: create minimal metadata from filename
+        metadata = {"iteration": latest_iter}
+    
+    return latest_path, metadata
+
+
+def find_wandb_run_id(checkpoint_dir: str):
+    """Try to find the W&B run ID from a previous run."""
+    wandb_dir = os.path.join(checkpoint_dir, "wandb")
+    if not os.path.isdir(wandb_dir):
+        return None
+    
+    # Look for run-* directories (format: run-YYYYMMDD_HHMMSS-RUNID)
+    run_dirs = []
+    for name in os.listdir(wandb_dir):
+        if name.startswith("run-"):
+            run_dirs.append(name)
+    
+    if not run_dirs:
+        return None
+    
+    # Sort to get the latest run
+    run_dirs.sort(reverse=True)
+    latest_run = run_dirs[0]
+    
+    # Extract run ID (last part after the last dash)
+    parts = latest_run.split("-")
+    if len(parts) >= 3:
+        run_id = parts[-1]
+        # W&B run IDs are typically 8 chars
+        if run_id and len(run_id) >= 6:
+            return run_id
+    
+    return None
+
+
 def main(args):
     # Ensure local Ray
     os.environ.pop("RAY_ADDRESS", None)
@@ -313,26 +381,94 @@ def main(args):
         ray.shutdown()
         sys.exit(1)
 
-    # Logging
-    logging_dir = f"{args.experiment_dir}/alignment_nccl_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    # Check for resumption
+    resume_checkpoint = None
+    resume_metadata = None
+    resume_wandb_run_id = None
+    start_iteration = 0
+    
+    if args.resume_from:
+        # args.resume_from can be a full path or just a directory name
+        if os.path.isabs(args.resume_from):
+            resume_dir = args.resume_from
+        else:
+            resume_dir = os.path.join(args.experiment_dir, args.resume_from)
+        
+        if os.path.isdir(resume_dir):
+            resume_checkpoint, resume_metadata = find_latest_checkpoint(resume_dir)
+            if resume_checkpoint:
+                print(f"✅ Found checkpoint to resume from: {resume_checkpoint}")
+                if resume_metadata:
+                    start_iteration = resume_metadata.get("iteration", 0)
+                    print(f"   Resuming from iteration: {start_iteration}")
+                    if resume_metadata.get("current_lambda") is not None:
+                        print(f"   Restoring lambda: {resume_metadata['current_lambda']}")
+                    if resume_metadata.get("jc_ema") is not None:
+                        print(f"   Restoring jc_ema: {resume_metadata['jc_ema']}")
+                
+                # Try to find W&B run ID for resumption
+                resume_wandb_run_id = resume_metadata.get("wandb_run_id") if resume_metadata else None
+                if not resume_wandb_run_id:
+                    resume_wandb_run_id = find_wandb_run_id(resume_dir)
+                if resume_wandb_run_id:
+                    print(f"   Found W&B run ID to resume: {resume_wandb_run_id}")
+            else:
+                print(f"⚠️  No checkpoint found in {resume_dir}, starting fresh")
+        else:
+            print(f"⚠️  Resume directory not found: {resume_dir}, starting fresh")
+
+    # Logging - use resume directory if resuming, otherwise create new
+    if args.resume_from and resume_checkpoint and os.path.isdir(resume_dir):
+        logging_dir = resume_dir
+        print(f"📁 Resuming in existing directory: {logging_dir}")
+    else:
+        logging_dir = f"{args.experiment_dir}/alignment_nccl_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
     writer = SummaryWriter(log_dir=logging_dir)
+    
     if args.wandb_project and wandb is not None:
         default_name = args.wandb_run_name or f"accl_api_{os.path.basename(args.policy_model_path)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        wandb.init(project=args.wandb_project, name=default_name, config={
-            'policy_model_path': args.policy_model_path,
-            'scorer_url': args.scorer_url,
-            'sigma': args.sigma,
-            'alpha': args.alpha,
-            'population_size': args.population_size,
-            'num_engines': args.num_engines,
-            'lambda_cost_init': args.lambda_cost,
-            'lambda_adapt': args.lambda_adapt,
-            'safe_first': args.safe_first,
-            'standardize_within_batch': args.standardize_within_batch,
-            'batch_size': args.batch_size,
-            'scorer_batch_size': args.scorer_batch_size,
-            'eval_every': args.eval_every,
-        })
+        
+        if resume_wandb_run_id:
+            # Resume existing W&B run
+            print(f"📊 Resuming W&B run: {resume_wandb_run_id}")
+            wandb.init(
+                project=args.wandb_project, 
+                id=resume_wandb_run_id,
+                resume="must",
+                config={
+                    'policy_model_path': args.policy_model_path,
+                    'scorer_url': args.scorer_url,
+                    'sigma': args.sigma,
+                    'alpha': args.alpha,
+                    'population_size': args.population_size,
+                    'num_engines': args.num_engines,
+                    'lambda_cost_init': args.lambda_cost,
+                    'lambda_adapt': args.lambda_adapt,
+                    'safe_first': args.safe_first,
+                    'standardize_within_batch': args.standardize_within_batch,
+                    'batch_size': args.batch_size,
+                    'scorer_batch_size': args.scorer_batch_size,
+                    'eval_every': args.eval_every,
+                    'resumed_from_iteration': start_iteration,
+                })
+        else:
+            # Start new W&B run
+            wandb.init(project=args.wandb_project, name=default_name, config={
+                'policy_model_path': args.policy_model_path,
+                'scorer_url': args.scorer_url,
+                'sigma': args.sigma,
+                'alpha': args.alpha,
+                'population_size': args.population_size,
+                'num_engines': args.num_engines,
+                'lambda_cost_init': args.lambda_cost,
+                'lambda_adapt': args.lambda_adapt,
+                'safe_first': args.safe_first,
+                'standardize_within_batch': args.standardize_within_batch,
+                'batch_size': args.batch_size,
+                'scorer_batch_size': args.scorer_batch_size,
+                'eval_every': args.eval_every,
+            })
         wandb.define_metric("iteration")
         wandb.define_metric("*", step_metric="iteration")
 
@@ -362,11 +498,25 @@ def main(args):
     # Load policy tokenizer for prompt formatting
     policy_tokenizer = AutoTokenizer.from_pretrained(base_model_path)
 
-    def save_hf_latest_from_engine(engine, iteration: int):
-        """Save current engine weights into HF-format 'latest' directory."""
+    def save_hf_latest_from_engine(engine, iteration: int, current_lambda_val: float = None, 
+                                     jc_ema_val: float = None, wandb_run_id: str = None):
+        """Save current engine weights into HF-format 'latest' directory with training state."""
         tmp_path = f"{model_saves_dir}/tmp_iter_{iteration}.pth"
         # dump raw state_dict from engine to tmp
         ray.get(engine.collective_rpc.remote("save_self_weights_to_disk", args=(tmp_path,)))
+        
+        # Save training state metadata alongside the .pth file
+        meta_path = f"{model_saves_dir}/tmp_iter_{iteration}_meta.json"
+        training_state = {
+            "iteration": iteration,
+            "timestamp": datetime.now().strftime('%Y%m%d_%H%M%S'),
+            "current_lambda": current_lambda_val,
+            "jc_ema": jc_ema_val,
+            "wandb_run_id": wandb_run_id,
+        }
+        with open(meta_path, "w") as f:
+            json.dump(training_state, f, indent=2)
+        
         # load base model on CPU and load state dict
         mdl = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.float16).to("cpu")
         state = torch.load(tmp_path, map_location="cpu")
@@ -379,12 +529,8 @@ def main(args):
         policy_tokenizer.save_pretrained(latest_dir)
         mdl.save_pretrained(latest_dir)
         with open(os.path.join(latest_dir, "ckpt_meta.json"), "w") as f:
-            json.dump({"iteration": iteration, "timestamp": datetime.now().strftime('%Y%m%d_%H%M%S')}, f)
-        # cleanup
-        try:
-            os.remove(tmp_path)
-        except Exception:
-            pass
+            json.dump(training_state, f, indent=2)
+        # Keep the .pth and metadata for resumption (don't delete)
         del mdl, state
         gc.collect()
         if torch.cuda.is_available():
@@ -438,14 +584,55 @@ def main(args):
     train_prompts = sample_prompts('train', args.train_samples, args.train_jsonl)
     eval_prompts = sample_prompts('test', args.eval_samples, args.eval_jsonl)
 
+    # Determine model path for engine launch (use checkpoint if resuming)
+    if resume_checkpoint:
+        # Check if it's an HF directory or a .pth file
+        if os.path.isdir(resume_checkpoint):
+            engine_model_path = resume_checkpoint
+            print(f"📦 Loading engines from HF checkpoint: {engine_model_path}")
+        else:
+            # It's a .pth file - we need to convert it to HF format first
+            print(f"📦 Loading weights from checkpoint: {resume_checkpoint}")
+            # Load the .pth into HF format for vLLM
+            resume_hf_dir = f"{model_saves_dir}/resume_hf_tmp"
+            if os.path.exists(resume_hf_dir):
+                shutil.rmtree(resume_hf_dir)
+            os.makedirs(resume_hf_dir, exist_ok=True)
+            
+            mdl = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.float16).to("cpu")
+            state = torch.load(resume_checkpoint, map_location="cpu")
+            mdl.load_state_dict(state, strict=True)
+            policy_tokenizer.save_pretrained(resume_hf_dir)
+            mdl.save_pretrained(resume_hf_dir)
+            del mdl, state
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            engine_model_path = resume_hf_dir
+            print(f"   Converted checkpoint to HF format at: {engine_model_path}")
+    else:
+        engine_model_path = base_model_path
+
     # Launch engines (exactly like countdown)
     print(f"\nLaunching {args.num_engines} vLLM engines with placement groups...")
-    engines, _ = launch_engines(args.num_engines, base_model_path)
+    engines, _ = launch_engines(args.num_engines, engine_model_path)
     print(f"✅ Submitted {len(engines)} engines")
 
-    # Initialize lambda for Lagrangian adaptation
-    current_lambda = float(args.lambda_cost)
-    jc_ema = None
+    # Initialize lambda for Lagrangian adaptation (restore from checkpoint if available)
+    if resume_metadata and resume_metadata.get("current_lambda") is not None:
+        current_lambda = float(resume_metadata["current_lambda"])
+        print(f"   Restored current_lambda = {current_lambda}")
+    else:
+        current_lambda = float(args.lambda_cost)
+    
+    if resume_metadata and resume_metadata.get("jc_ema") is not None:
+        jc_ema = float(resume_metadata["jc_ema"])
+        print(f"   Restored jc_ema = {jc_ema}")
+    else:
+        jc_ema = None
+    
+    # Get W&B run ID for saving in checkpoints
+    current_wandb_run_id = wandb.run.id if (args.wandb_project and wandb is not None and wandb.run) else None
 
     # Init inter-engine communicator once
     master_address = get_ip()
@@ -478,7 +665,11 @@ def main(args):
     signal.signal(signal.SIGTERM, sig_handler)
 
     # Training loop (exactly like original but with API calls)
-    for i in range(args.num_iterations):
+    # Resume from start_iteration if resuming from checkpoint
+    if start_iteration > 0:
+        print(f"\n🔄 Resuming training from iteration {start_iteration}")
+    
+    for i in range(start_iteration, args.num_iterations):
         print(f"\n\n=== Generation {i} ===")
         total_iter_start = time.time()
 
@@ -724,10 +915,16 @@ def main(args):
                     'eval/total_samples': eval_results_i['total_samples'],
                 }, step=i)
 
-        # Periodic HF-format checkpoint (latest only)
+        # Periodic HF-format checkpoint (latest only) with full training state
         if args.save_every > 0 and ((i + 1) % args.save_every == 0):
             try:
-                save_hf_latest_from_engine(engines[0], i + 1)
+                save_hf_latest_from_engine(
+                    engines[0], 
+                    i + 1, 
+                    current_lambda_val=current_lambda,
+                    jc_ema_val=jc_ema,
+                    wandb_run_id=current_wandb_run_id,
+                )
                 if args.wandb_project and wandb is not None:
                     wandb.log({'checkpoint/iteration': i + 1}, step=i)
             except Exception as e:
@@ -780,8 +977,15 @@ def main(args):
 
     # Save final HF-format checkpoint to 'latest_hf'
     try:
-        save_hf_latest_from_engine(engines[0], args.num_iterations)
-        log_artifact_dir(f"{model_saves_dir}/latest_hf", name=f"{wandb.run.id}-latest_hf", type_="model")
+        save_hf_latest_from_engine(
+            engines[0], 
+            args.num_iterations,
+            current_lambda_val=current_lambda,
+            jc_ema_val=jc_ema,
+            wandb_run_id=current_wandb_run_id,
+        )
+        if args.wandb_project and wandb is not None and wandb.run:
+            log_artifact_dir(f"{model_saves_dir}/latest_hf", name=f"{wandb.run.id}-latest_hf", type_="model")
 
         print("Final HF-format checkpoint saved to latest_hf.")
     except Exception as e:
@@ -795,7 +999,8 @@ def main(args):
             "save_self_weights_to_disk", args=(f"{final_model_path}/pytorch_model.pth",)
         )
     )
-    log_artifact_dir(final_model_path, name=f"{wandb.run.id}-final_model", type_="model")
+    if args.wandb_project and wandb is not None and wandb.run:
+        log_artifact_dir(final_model_path, name=f"{wandb.run.id}-final_model", type_="model")
     print(f"Final model weights saved to {final_model_path}.")
 
     cleanup()
