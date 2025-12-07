@@ -10,7 +10,7 @@
 #SBATCH --mem=400GB
 #SBATCH --partition=kempner_h100
 #SBATCH --constraint=h100
-#SBATCH --array=0-1
+#SBATCH --array=0-3
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ set -euo pipefail
 # Beta sweep configuration
 # Each array task gets a different beta value
 # =============================================================================
-BETA_VALUES=(0.01 0.1)
+BETA_VALUES=(0.01 0.05 0.1 0.15)
 BETA=${BETA_VALUES[$SLURM_ARRAY_TASK_ID]}
 
 echo "========================================"

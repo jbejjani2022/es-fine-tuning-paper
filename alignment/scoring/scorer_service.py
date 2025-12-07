@@ -15,7 +15,7 @@ from pydantic import BaseModel
 import uvicorn
 
 # Ensure local safe-rlhf package is importable (same as classify_reward_cost_unified.py)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'safe-rlhf'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'safe-rlhf'))
 from transformers import AutoTokenizer
 from safe_rlhf.models import AutoModelForScore
 

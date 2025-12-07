@@ -111,35 +111,37 @@ def call_scorer_api(
     """
     Call the external scorer API to get rewards and costs.
 
-    `prompts` should be either raw user strings or full conversation prefixes.
-    The scorer service builds the canonical
-      "BEGINNING OF CONVERSATION: USER: <prompt> ASSISTANT:<response><eos>"
-    internally, matching the ES alignment setup.
+    texts are pre-formatted full conversation strings:
+      "BEGINNING OF CONVERSATION: USER: {user} ASSISTANT:{response}"
+
+    We pass them directly to the scorer without splitting/rebuilding.
+    This follows the safe-rlhf pattern of passing the full sequence.
     """
     global _SCORER_CALL_COUNT
     try:
-        prompts, responses = [], []
-        for text in texts:
-            # Robustly extract between USER: and ASSISTANT:
-            if 'USER:' in text and 'ASSISTANT:' in text:
-                user_part = text.split('USER:', 1)[1]
-                user = user_part.rsplit('ASSISTANT:', 1)[0].strip()
-                resp = text.split('ASSISTANT:', 1)[1]
-                prompts.append(user)
-                responses.append(resp)
-            else:
-                # Fallback: treat whole text as prompt, empty response
-                prompts.append(text)
-                responses.append("")
+        all_rewards: List[float] = []
+        all_costs: List[float] = []
 
-        all_rewards, all_costs = [], []
+        # DEBUG: Log the first batch payload to understand what we're sending
+        if _SCORER_CALL_COUNT == 0 and os.environ.get("RANK", "0") == "0":
+            n_debug = min(5, len(texts))
+            print("\n" + "=" * 80)
+            print("[DEBUG SCORER PAYLOAD] First call to scorer API")
+            print(f"Total texts to score: {len(texts)}")
+            print("=" * 80)
+            for idx in range(n_debug):
+                print(f"\n--- Example {idx} ---")
+                print(f"[FULL TEXT (sent to scorer)]:\n{repr(texts[idx][:500])}...")
+            print("\n" + "=" * 80)
+            # Also log as JSON for easy reproduction
+            debug_payload = {"texts": texts[:n_debug]}
+            print(f"[DEBUG JSON PAYLOAD for curl test]:\n{json.dumps(debug_payload, ensure_ascii=False)}")
+            print("=" * 80 + "\n")
+            _SCORER_CALL_COUNT += 1
 
-        for i in range(0, len(prompts), batch_size):
-            payload = {
-                "prompts": prompts[i:i+batch_size],
-                "responses": responses[i:i+batch_size],
-            }
-            r = requests.post(f"{scorer_url}/score_batch", json=payload, timeout=300)
+        for i in range(0, len(texts), batch_size):
+            payload = {"texts": texts[i : i + batch_size]}
+            r = requests.post(f"{scorer_url}/score_texts", json=payload, timeout=300)
             r.raise_for_status()
             result = r.json()
             all_rewards.extend(result["rewards"])
@@ -161,7 +163,7 @@ def call_scorer_api(
     except requests.exceptions.RequestException as e:
         print(f"[AdaptiveReward] Error calling scorer API: {e}")
         # Return zeros on error to avoid crashing, but this is bad
-        return [0.0] * len(prompts), [0.0] * len(prompts)
+        return [0.0] * len(texts), [0.0] * len(texts)
 
 
 class AdaptiveReward:
@@ -928,7 +930,7 @@ def run_single_training(cfg: dict, beta: float, seed: int):
     # GRPO / training config
     use_vllm = bool(int(os.environ.get("USE_VLLM", "0")))
     grpo_args = GRPOConfig(
-        output_dir=os.path.join(cfg["output_dir"], f"beta{beta}_seed{seed}_unified"),
+        output_dir=os.path.join(cfg["output_dir"], f"beta{beta}_seed{seed}"),
         per_device_train_batch_size=cfg.get("per_device_train_batch_size", 1),
         per_device_eval_batch_size=cfg.get("per_device_eval_batch_size", 2),
         gradient_accumulation_steps=cfg.get("gradient_accumulation_steps", 1),
@@ -940,7 +942,7 @@ def run_single_training(cfg: dict, beta: float, seed: int):
         logging_steps=cfg.get("logging_steps", 5),
         save_steps=cfg.get("save_steps", 100),
         report_to=["wandb"],
-        run_name=f"grpo_align_beta{beta}_seed{seed}_unified",
+        run_name=f"grpo_align_beta{beta}_seed{seed}_unified_n{len(train_prompts_text)}",
         bf16=True,
         remove_unused_columns=False,
         # generation settings for policy sampling

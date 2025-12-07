@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 # Ensure local safe-rlhf package is importable without env mods
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'safe-rlhf'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'safe-rlhf'))
 
 from transformers import AutoTokenizer
 from safe_rlhf.models import AutoModelForScore

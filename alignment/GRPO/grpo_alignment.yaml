@@ -1,8 +1,8 @@
 model_name: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b
-train_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/custom_train_250.jsonl
-eval_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/custom_eval_500.jsonl
+train_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/train_50_eval_100/custom_train_50.jsonl
+eval_jsonl: /n/home07/itamarf/es-fine-tuning-paper/alignment/data/train_50_eval_100/custom_eval_100.jsonl
 prompt_key: prompt
-scorer_url: http://holygpu8a17404:8000
+scorer_url: http://holygpu8a11303:8000
 
 # ---------- Lambda / constraint (matched to ES defaults) ----------
 lambda_cost: 1.0              # initial λ (ES uses --lambda_cost 1)
@@ -33,7 +33,7 @@ learning_rate: 5.0e-6
 lr_scheduler_type: constant
 warmup_steps: 0
 num_train_epochs: 1
-max_steps: 500
+max_steps: 1000
 gradient_accumulation_steps: 15
 per_device_train_batch_size: 1
 per_device_eval_batch_size: 2
@@ -44,8 +44,8 @@ eval_every: 100               # run eval (greedy) every 100 global steps
 # ---------- Logging / W&B ----------
 project: grpo_alignment
 entity: itamarf
-output_dir: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output
-save_steps: 100
+output_dir: /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/alignment/GRPO_output/unified_n50
+save_steps: 250
 logging_steps: 5
 
 loss_type: grpo

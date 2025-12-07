@@ -24,7 +24,7 @@
 export PYTHONPATH=/n/home07/itamarf/es-fine-tuning-paper:$PYTHONPATH
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Get the scorer service hostname (should be provided as environment variable or argument)
-SCORER_HOST=holygpu8a13104
+SCORER_HOST=holygpu8a11303
 SCORER_URL="http://${SCORER_HOST}:8000"
 
 # Note: The scorer service should be running separately
@@ -36,7 +36,7 @@ echo "Starting ES fine-tuning for alignment with external scorer API..."
 echo "Using GPUs: $CUDA_VISIBLE_DEVICES"
 echo "Scorer API URL: $SCORER_URL"
 
-python alignment/es-fine-tuning_alignment_accl_api.py \
+python alignment/ES/es-fine-tuning_alignment_accl_api.py \
   --policy_model_path /n/netscratch/kempner_sham_lab/Lab/itamarf/es-fine-tuning-paper/models/alpaca-7b \
   --num_engines 4 \
   --cuda_devices "0,1,2,3" \
@@ -44,7 +44,7 @@ python alignment/es-fine-tuning_alignment_accl_api.py \
   --scorer_batch_size 32 \
   --batch_size 64 \
   --population_size 30 \
-  --num_iterations 500 \
+  --num_iterations 1000 \
   --sigma 0.001 \
   --alpha 0.0005 \
   --max_new_tokens 512 \
@@ -53,7 +53,11 @@ python alignment/es-fine-tuning_alignment_accl_api.py \
   --lambda_pos_cost_only \
   --eval_every 100 \
   --wandb_project es_alignment \
-  --wandb_run_name acll_es_beaver_sig_0001_alpha_00005_lam_max_5 \
+  --wandb_run_name unified_1000_iter_50 \
   --lambda_cost 1 \
   --lambda_lr 0.005 \
-  --lambda_max 5.0
+  --lambda_max 5.0 \
+  --train_samples 50 \
+  --eval_samples 100 \
+  --train_jsonl /n/home07/itamarf/es-fine-tuning-paper/alignment/data/train_50_eval_100/custom_train_50.jsonl \
+  --eval_jsonl /n/home07/itamarf/es-fine-tuning-paper/alignment/data/train_50_eval_100/custom_eval_100.jsonl

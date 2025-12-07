@@ -22,7 +22,7 @@ from vllm import LLM, SamplingParams
 from vllm.utils import get_ip, get_open_port
 
 # Make local Safe-RLHF package importable for workers if needed
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'safe-rlhf'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'safe-rlhf'))
 from datasets import load_dataset
 
 # Default Hyperparameters
@@ -55,17 +55,17 @@ def parse_args():
     parser.add_argument("--experiment_dir", type=str, default=EXPERIMENT_DIR)
     parser.add_argument("--cuda_devices", type=str, default="0,1,2,3")
     parser.add_argument('--verbose', action='store_true', help='Print verbose logs')
-    parser.add_argument('--max_new_tokens', type=int, default=1024, help='Maximum number of tokens allowed to be generated')
+    parser.add_argument('--max_new_tokens', type=int, default=512, help='Maximum number of tokens allowed to be generated')
     
     # Scorer API configuration
     parser.add_argument("--scorer_url", type=str, default="http://localhost:8000", help="URL of the scorer API service")
     
     # Dataset and training args
-    parser.add_argument('--lambda_cost', type=float, default=0.5)
-    parser.add_argument('--train_samples', type=int, default=2000)
+    parser.add_argument('--lambda_cost', type=float, default=1.0)
+    parser.add_argument('--train_samples', type=int, default=250)
     parser.add_argument('--eval_samples', type=int, default=500)
-    parser.add_argument('--train_jsonl', type=str, default='alignment/data/custom_train_250.jsonl')
-    parser.add_argument('--eval_jsonl', type=str, default='alignment/data/custom_eval_500.jsonl')
+    parser.add_argument('--train_jsonl', type=str, default='alignment/data/train_250_eval_500/custom_train_250.jsonl')
+    parser.add_argument('--eval_jsonl', type=str, default='alignment/data/train_250_eval_500/custom_eval_500.jsonl')
     parser.add_argument('--batch_size', type=int, default=200, help='Number of prompts to sample per iteration for ES fitness')
     parser.add_argument('--standardize_within_batch', action='store_true', default=False,
                         help='Standardize reward and cost within mini-batch before combining')
@@ -450,6 +450,10 @@ def main(args):
                     'batch_size': args.batch_size,
                     'scorer_batch_size': args.scorer_batch_size,
                     'eval_every': args.eval_every,
+                    'train_jsonl': args.train_jsonl,
+                    'eval_jsonl': args.eval_jsonl,
+                    'train_samples': args.train_samples,
+                    'eval_samples': args.eval_samples,
                     'resumed_from_iteration': start_iteration,
                 })
         else:
@@ -468,6 +472,10 @@ def main(args):
                 'batch_size': args.batch_size,
                 'scorer_batch_size': args.scorer_batch_size,
                 'eval_every': args.eval_every,
+                'train_jsonl': args.train_jsonl,
+                'eval_jsonl': args.eval_jsonl,
+                'train_samples': args.train_samples,
+                'eval_samples': args.eval_samples,
             })
         wandb.define_metric("iteration")
         wandb.define_metric("*", step_metric="iteration")
@@ -536,35 +544,38 @@ def main(args):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    # Load prompts from custom JSONL if available; otherwise fall back to PKU dataset
+    # Load prompts from custom JSONL - errors out if path is provided but loading fails
     def load_prompts_from_jsonl(path: str, n: int):
-        try:
-            prompts_raw = []
-            with open(path, 'r') as f:
-                for line in f:
-                    obj = json.loads(line)
-                    if 'prompt' in obj:
-                        prompts_raw.append(obj['prompt'])
-            if not prompts_raw:
-                return None
-            rng = random.Random(args.global_seed or 42)
-            if n < len(prompts_raw):
-                prompts_raw = rng.sample(prompts_raw, n)
-            prompts = []
-            for user_prompt in prompts_raw:
-                conv = format_prompt_local(user_prompt, policy_tokenizer.eos_token or '</s>')
-                if not conv.endswith(PROMPT_ASSISTANT):
-                    conv = conv + PROMPT_ASSISTANT
-                prompts.append(conv)
-            return prompts
-        except Exception:
-            return None
+        prompts_raw = []
+        with open(path, 'r') as f:
+            for line in f:
+                obj = json.loads(line)
+                if 'prompt' in obj:
+                    prompts_raw.append(obj['prompt'])
+        if not prompts_raw:
+            raise ValueError(f"No prompts found in JSONL file: {path} (no 'prompt' key in any row)")
+        rng = random.Random(args.global_seed or 42)
+        if n < len(prompts_raw):
+            prompts_raw = rng.sample(prompts_raw, n)
+        prompts = []
+        for user_prompt in prompts_raw:
+            conv = format_prompt_local(user_prompt, policy_tokenizer.eos_token or '</s>')
+            if not conv.endswith(PROMPT_ASSISTANT):
+                conv = conv + PROMPT_ASSISTANT
+            prompts.append(conv)
+        print(f"Loaded {len(prompts)} prompts from {path}")
+        print(f"First 5 prompts: {prompts[:5]}")
+        return prompts
 
     def sample_prompts(split: str, n: int, jsonl_path: str | None = None):
-        if jsonl_path and os.path.exists(jsonl_path):
-            loaded = load_prompts_from_jsonl(jsonl_path, n)
-            if loaded is not None:
-                return loaded
+        # If JSONL path is provided, it MUST load successfully - no silent fallback
+        if jsonl_path:
+            if not os.path.exists(jsonl_path):
+                raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
+            return load_prompts_from_jsonl(jsonl_path, n)
+        
+        # No JSONL provided - use PKU dataset
+        print(f"Loading {split} dataset from PKU-Alignment/PKU-SafeRLHF")
         ds = load_dataset('PKU-Alignment/PKU-SafeRLHF', split=split)
         total = len(ds)
         indices = list(range(total))
@@ -583,6 +594,16 @@ def main(args):
 
     train_prompts = sample_prompts('train', args.train_samples, args.train_jsonl)
     eval_prompts = sample_prompts('test', args.eval_samples, args.eval_jsonl)
+
+    # Print data info
+    print("\n" + "=" * 60)
+    print("📊 DATA CONFIGURATION")
+    print("=" * 60)
+    print(f"  Train data: {args.train_jsonl if args.train_jsonl and os.path.exists(args.train_jsonl) else 'PKU-Alignment/PKU-SafeRLHF (train split)'}")
+    print(f"  Train samples loaded: {len(train_prompts)}")
+    print(f"  Eval data:  {args.eval_jsonl if args.eval_jsonl and os.path.exists(args.eval_jsonl) else 'PKU-Alignment/PKU-SafeRLHF (test split)'}")
+    print(f"  Eval samples loaded:  {len(eval_prompts)}")
+    print("=" * 60 + "\n")
 
     # Determine model path for engine launch (use checkpoint if resuming)
     if resume_checkpoint:
@@ -896,16 +917,20 @@ def main(args):
             writer.add_scalar("eval/mean_cost", eval_results_i["mean_cost"], i)
             writer.add_scalar("eval/mean_combined", eval_results_i["mean_combined"], i)
             if args.wandb_project and wandb is not None:
+                # Log eval samples table with full prompts and completions (no trimming)
                 rows = []
-                # cap to prevent huge logs
-                cap = min(10, len(eval_results_i["eval_prompts"]))
-                for k in range(cap):
+                n_samples = len(eval_results_i["eval_prompts"])
+                for k in range(n_samples):
                     prompt = eval_results_i["eval_prompts"][k]
-                    resp   = eval_results_i["eval_outputs"][k].outputs[0].text
+                    resp = eval_results_i["eval_outputs"][k].outputs[0].text
                     r = float(eval_results_i["scores_raw"]["per_sample_reward"][k])
                     c = float(eval_results_i["scores_raw"]["per_sample_cost"][k])
-                    rows.append([prompt, resp, r, c])
-                table = wandb.Table(columns=["prompt", "response", "reward", "cost"], data=rows)
+                    comb = r - current_lambda * c
+                    rows.append([prompt, resp, r, c, comb, bool(c > 0.0)])
+                table = wandb.Table(
+                    columns=["prompt", "response", "reward", "cost", "combined", "unsafe"],
+                    data=rows
+                )
                 wandb.log({
                     "iteration": i,
                     "eval/samples": table,
@@ -942,7 +967,22 @@ def main(args):
     print(f"Mean Combined: {eval_results['mean_combined']:.4f}")
     print("="*80 + "\n")
     if args.wandb_project and wandb is not None:
+        # Log eval samples table with full prompts and completions (no trimming)
+        final_eval_rows = []
+        n_samples = len(eval_results["eval_prompts"])
+        for k in range(n_samples):
+            prompt = eval_results["eval_prompts"][k]
+            resp = eval_results["eval_outputs"][k].outputs[0].text
+            r = float(eval_results["scores_raw"]["per_sample_reward"][k])
+            c = float(eval_results["scores_raw"]["per_sample_cost"][k])
+            comb = r - current_lambda * c
+            final_eval_rows.append([prompt, resp, r, c, comb, bool(c > 0.0)])
+        final_eval_table = wandb.Table(
+            columns=["prompt", "response", "reward", "cost", "combined", "unsafe"],
+            data=final_eval_rows
+        )
         wandb.log({
+            'eval/final_samples': final_eval_table,
             'eval/mean_reward': eval_results['mean_reward'],
             'eval/mean_cost': eval_results['mean_cost'],
             'eval/mean_combined': eval_results['mean_combined'],

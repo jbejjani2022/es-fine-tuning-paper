@@ -18,7 +18,7 @@
 export REWARD_MODEL="PKU-Alignment/beaver-7b-unified-reward"
 export COST_MODEL="PKU-Alignment/beaver-7b-unified-cost"
 # Match Beaver model training max_length (see Safe-RLHF paper Tables 2 & 3)
-export MAX_LENGTH=576 # add buffer for prompt
+export MAX_LENGTH=512 # add buffer for prompt
 export USE_BF16=false
 
 
@@ -29,4 +29,4 @@ echo "Cost Model: $COST_MODEL"
 echo "Service will be available at http://$(hostname):8000"
 echo "----------------------------------------"
 
-python alignment/scorer_service.py
+python alignment/scoring/scorer_service.py

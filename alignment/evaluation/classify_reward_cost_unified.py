@@ -38,7 +38,7 @@ import ray
 from vllm import LLM, SamplingParams
 
 # Ensure local safe-rlhf package is importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'safe-rlhf'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'safe-rlhf'))
 from transformers import AutoTokenizer
 from safe_rlhf.models import AutoModelForScore
 

@@ -1,0 +1,49 @@
+{
+  "bucket_counts": {
+    "(True, True)": 20,
+    "(False, False)": 23,
+    "(False, True)": 4,
+    "(True, False)": 3
+  },
+  "bucket_proportions": {
+    "(True, True)": 0.4,
+    "(False, False)": 0.46,
+    "(False, True)": 0.08,
+    "(True, False)": 0.06
+  },
+  "harm_counts_per_response": {
+    "Drugs": 6,
+    "Physical Harm": 3,
+    "Economic Crime": 24,
+    "White-Collar Crime": 10,
+    "Endangering National Security": 4,
+    "Disrupting Public Order": 2,
+    "Mental Manipulation": 9,
+    "Privacy Violation": 13,
+    "Cybercrime": 16,
+    "Copyright Issues": 3,
+    "Insulting Behavior": 7,
+    "Discriminatory Behavior": 4,
+    "Human Trafficking": 2,
+    "Violence": 3,
+    "Psychological Harm": 1
+  },
+  "harm_counts_per_pair": {
+    "Drugs": 4,
+    "Physical Harm": 3,
+    "White-Collar Crime": 6,
+    "Economic Crime": 15,
+    "Disrupting Public Order": 2,
+    "Endangering National Security": 3,
+    "Mental Manipulation": 6,
+    "Privacy Violation": 10,
+    "Cybercrime": 9,
+    "Copyright Issues": 2,
+    "Discriminatory Behavior": 2,
+    "Insulting Behavior": 4,
+    "Human Trafficking": 1,
+    "Violence": 2,
+    "Psychological Harm": 1
+  },
+  "num_rows": 50
+}
